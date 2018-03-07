@@ -3,10 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-
 #include "disk.h"
 #include "fs.h" 
-#define FAT_EOC 0xFFFF;
+#define FAT_EOC 65535
 //uint8_t
 //uint16_t
 //uint32_t
@@ -78,7 +77,7 @@ struct fsys * fs_malloc()
 	for(uint16_t i=0; i<newfs->super->fatnum; i++)
 	{
 		newfs->fat[i] = (struct fatblock *) malloc(sizeof(struct fatblock));
-		printf("Allocated memory for fatblock %d\n", i);
+		//printf("Allocated memory for fatblock %d\n", i);
 	}
 	while(blockindex < newfs->super->rootindex)
 	{
@@ -96,10 +95,11 @@ struct fsys * fs_malloc()
 	{
 		newfs->data[i] = (struct datablock *) malloc(BLOCK_SIZE);
 		block_read(diskindex++, newfs->data[i]);
-		printf("Allocated memory for datablock %d\n", i);
+		//printf("Allocated memory for datablock %d\n", i);
 	} // iterate through each datablock and insert into fs
 	return newfs;
 }
+
 
 int fs_mount(const char *diskname)
 {
@@ -115,7 +115,7 @@ int fs_mount(const char *diskname)
 		
 		//Make a superblock *
 		fs = fs_malloc();
-		if(fs_malloc() == NULL)
+		if(fs == NULL)
 		{
 			return -1;
 		}
@@ -128,21 +128,87 @@ int fs_mount(const char *diskname)
 int fs_umount(void)
 {
 	/* TODO: Phase 1 */
-	// make null all associations between file system and drive
-	// for(int i = 0; i < fs->super )
-	// fs->super = NULL:
-	// free(fs->super);
-	// block_disk_close()
+	printf("TRYING TO UMOUNT \n");
+	int index = 0;
+	int dataindex = 0;
+	int fatindex = 0;
+	size_t diskindex = 0;
+	while(index != block_disk_count())
+	{
+		if(index == 0)
+		{
+			if(block_write(diskindex++, fs->super) == -1)
+				return -1; // if blockwrite fails 
+			index++;
+			continue;
+			// Do not free super until the end
+		} // Write super into first block of disk
+		if(index < fs->super->rootindex)
+		{
+			struct fatblock * temp = fs->fat[fatindex++];
+			if(block_write(diskindex++, temp) == -1)
+				return -1; // if blockwrite fails 
+			free(temp); // Free the fatblock * one by one
+			printf("Freed fatblock #%d \n",fatindex);
+			index++;
+			continue;
+		} // Write the fat blocks 
+		if(index == fs->super->rootindex)
+		{
+			free(fs->fat); // Free the fatblock **
+			printf("Free fat list \n");
+			if(block_write(diskindex++, fs->root) == -1)
+				return -1; // if blockwrite fails 
+			free(fs->root); // Free the rootblock *
+			printf("Freed rootblock \n");
+			index++;
+			continue;
+		} // Write the root block into disk and free
+		else
+		{
+			struct datablock * temp = fs->data[dataindex++];
+			if(block_write(diskindex++, temp) == -1)
+				return -1; // if blockwrite fails 
+			free(temp); // Free datablock * one by one
+			printf("Freed datablock #%d \n",dataindex);
+			index++;
+			continue;
+ 		} // Write the data blocks 
+
+	}
+	free(fs->data);
+	printf("Freed data list \n");
+	free(fs->super);
+	printf("Freed superblock \n");
+	free(fs);
+	printf("Freed filesystem \n");
 	return 0;	
 }
 int fs_getfreefat()
 {
-	int index = 0;
-	while(fs->fat[index] != 0)
+	int blockindex = 0;
+	int wordindex = 0;
+	while((fs->fat[blockindex])->word[wordindex] != 0)
 	{
-		index++;
+		
+		if(wordindex + (blockindex * 2048) > fs->super->datablocknum)
+		{
+			return 0;
+			//We are passed the last known fat word
+		}
+		printf("fat[%d][%d] is : %d FAT_EOC is : %d \n", blockindex, wordindex, (fs->fat[blockindex])->word[wordindex], FAT_EOC);
+		if(wordindex < 2048)
+		{
+			wordindex++;			
+		}
+		else
+		{
+			wordindex = 0;
+			blockindex++;
+		}
+
 	}
-	return (fs->super->datablocknum - index);
+	return (fs->super->datablocknum - (wordindex + (blockindex * 2048)));
 }
 int fs_getfreefiles()
 {
@@ -156,14 +222,14 @@ int fs_getfreefiles()
 int fs_info(void)
 {
 	printf("super->sig is %s \n", fs->super->sig);
-	// printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
-	// 	fs->super->blocksize,
-	// 	fs->super->fatnum,
-	// 	fs->super->rootindex,
-	// 	fs->super->dataindex,
-	// 	fs->super->datablocknum,
-	// 	fs_getfreefat(),fs->super->datablocknum,
-	// 	fs_getfreefiles(), 128);
+	 printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
+	 	fs->super->blocksize,
+	 	fs->super->fatnum,
+	 	fs->super->rootindex,
+	 	fs->super->dataindex,
+	 	fs->super->datablocknum,
+	 	fs_getfreefat(),fs->super->datablocknum,
+	 	fs_getfreefiles(), 128);
 	return 0;	/* TODO: Phase 1 */
 }
 
