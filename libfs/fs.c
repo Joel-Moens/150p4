@@ -11,11 +11,11 @@
 //uint16_t
 //uint32_t
 //uint64_t
-struct fsys {
+struct __attribute__ ((__packed__)) fsys {
 	struct superblock * super;
-	struct fatblock ** fat;
+	struct fatblock * fat[4];
 	struct rootblock * root;
-	struct datablock ** data;
+	struct datablock * data[8192];
 }; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of datablocks
 struct __attribute__ ((__packed__)) filedescriptor {
 	char name[16];
@@ -44,60 +44,47 @@ struct __attribute__ ((__packed__))  datablock {
 	void * memory;
 }; //block that stores file data
 
-
-struct rootblock * root;
-struct superblock * super;
-struct fatblock ** fat;
-struct datablock ** data;
+static struct fsys * fs;
 //fs was going to be our filesystem that we use for this entire project, but trying to test out each component to see what the problem is
 /* TODO: Phase 1 */
 int fs_malloc()
 {
 	// Allocate for each component
-	super = (struct superblock *) malloc(sizeof(struct superblock));
-	printf("super signature is: %s, super blocksize is: %d \n", super->sig, super->blocksize);
-	void * address = (void * ) malloc(sizeof(void));
-	block_read(0, address);
-	super = (struct superblock *)address;
-
-	// CURRENTLY STUCK HERE trying to allocated fatblock **
-	// I need a fatblock** because I'm making an array of fatblock *
-	// This next printf works, showing that block_read api and type casting works fine
-	printf("super signature is: %s, super blocksize is: %d \n", super->sig, super->blocksize);
-
-	//Tried googling this on stackoverflow and says to use valgrind, I don't know how to get that to test the code though
-	fat = (struct fatblock **) malloc((int)super->fatnum * sizeof(struct fatblock*) );
-	printf("super signature is: %s, super blocksize is: %d \n", super->sig, super->blocksize);
-	root = (struct rootblock *) malloc(sizeof(struct rootblock));
-	data = (struct datablock **) malloc(sizeof(struct datablock) * super->datablocknum);
-
-	printf("super signature is: %s, super blocksize is: %d \n", super->sig, super->blocksize);
+	void * buffer = (void *) malloc(sizeof(void));
+	struct fsys * newfs = (struct fsys *) malloc(sizeof(struct fsys));
+	block_read(0, buffer);
+	newfs->super = (struct superblock *) malloc(sizeof(struct superblock));
+	newfs->super = buffer;
+	printf("super signature is: %s, super blocksize is: %d \n", newfs->super->sig, newfs->super->blocksize);
+	
 	char signature[8] = "ECS150FS";
-	if(strcmp(super->sig, signature) != 0)
+	if(strcmp(newfs->super->sig, signature) != 0)
 	{
 		printf("Error Signature does not equal ECS150FS \n");
 		//return NULL;
 	}
-	if((super->fatnum + 2 + super->datablocknum) != super->blocksize)
+	if((newfs->super->fatnum + 2 + newfs->super->datablocknum) != newfs->super->blocksize)
 	{
 		printf("Error Block Size and Fatnum + Root + Super + Data Block Size are not equal. \n");
 		return -1;
 	}
+	
 	uint16_t index = 1;
-	while(index < super->rootindex)
+	newfs->fat[0] = (struct fatblock *) malloc(sizeof(struct fatblock) * newfs->super->fatnum);
+	while(index < newfs->super->rootindex)
 	{
-		block_read(index, address);
-		printf("Trying to insert fatblock %d\n", index-1);
-		fat[index-1] = (struct fatblock *) address;
-		index++;	
-	}
-	block_read(index++, address);
-	root = (struct rootblock *)address;
-	for(int i = 0; i < super->datablocknum; i++)
+		printf("Trying to insert fatblock %d rootindex is %d \n", index-1,newfs->super->rootindex);
+		block_read(index, buffer);
+		newfs->fat[index-1] = buffer;
+		index++;
+		printf("Trying to insert fatblock %d rootindex is %d \n", index-1,newfs->super->rootindex);
+	} // iterate through each fat and insert into fs
+	block_read(index++, (void *) newfs->root);
+	return 0;
+	for(int i = 0; i < newfs->super->datablocknum; i++)
 	{
-		block_read(index++, address);
-		data[i] = (struct datablock *) address;
-	}
+		block_read(index++, newfs->data[i]);
+	} // iterate through each datablock and insert into fs
 	return 0;
 }
 
@@ -134,16 +121,16 @@ int fs_umount(void)
 int fs_getfreefat()
 {
 	int index = 0;
-	while(fat[index] != 0)
+	while(fs->fat[index] != 0)
 	{
 		index++;
 	}
-	return (super->datablocknum - index);
+	return (fs->super->datablocknum - index);
 }
 int fs_getfreefiles()
 {
 	int index = 0;
-	while(root->entry[index].name[0] != '\0')
+	while(fs->root->entry[index].name[0] != '\0')
 	{
 		index++;
 	}
@@ -151,15 +138,15 @@ int fs_getfreefiles()
 }
 int fs_info(void)
 {
-	printf("super->sig is %s \n", super->sig);
-	printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
-		super->blocksize,
-		super->fatnum,
-		super->rootindex,
-		super->dataindex,
-		super->datablocknum,
-		fs_getfreefat(),super->datablocknum,
-		fs_getfreefiles(), 128);
+	//printf("super->sig is %s \n", fs->super->sig);
+	// printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
+	// 	fs->super->blocksize,
+	// 	fs->super->fatnum,
+	// 	fs->super->rootindex,
+	// 	fs->super->dataindex,
+	// 	fs->super->datablocknum,
+	// 	fs_getfreefat(),fs->super->datablocknum,
+	// 	fs_getfreefiles(), 128);
 	return 0;	/* TODO: Phase 1 */
 }
 
