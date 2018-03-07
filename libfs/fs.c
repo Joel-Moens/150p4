@@ -11,12 +11,6 @@
 //uint16_t
 //uint32_t
 //uint64_t
-struct __attribute__ ((__packed__)) fsys {
-	struct superblock * super;
-	struct fatblock * fat[4];
-	struct rootblock * root;
-	struct datablock * data[8192];
-}; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of datablocks
 struct __attribute__ ((__packed__)) filedescriptor {
 	char name[16];
 	uint64_t size;
@@ -43,19 +37,26 @@ struct __attribute__ ((__packed__)) rootblock {
 struct __attribute__ ((__packed__))  datablock {
 	void * memory;
 }; //block that stores file data
+struct __attribute__ ((__packed__)) fsys {
+	struct superblock * super;
+	struct fatblock ** fat;
+	struct rootblock * root;
+	struct datablock ** data;
+}; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of datablocks
 
+//Pointer to the filesystem we will malloc when we mount a disk
 static struct fsys * fs;
 //fs was going to be our filesystem that we use for this entire project, but trying to test out each component to see what the problem is
 /* TODO: Phase 1 */
-int fs_malloc()
+struct fsys * fs_malloc()
 {
-	// Allocate for each component
-	void * buffer = (void *) malloc(sizeof(void));
+	// Malloc for a pointer that will read from disk
 	struct fsys * newfs = (struct fsys *) malloc(sizeof(struct fsys));
-	block_read(0, buffer);
 	newfs->super = (struct superblock *) malloc(sizeof(struct superblock));
-	newfs->super = buffer;
-	printf("super signature is: %s, super blocksize is: %d \n", newfs->super->sig, newfs->super->blocksize);
+	// Malloc a temp fsys pointer for the filesystem 
+	block_read(0, newfs->super);
+	// Malloc the superblock pointer for the superblock point to buffer
+	printf("super signature is: %s, super blocksize is: %d, fatnum is: %d\n", newfs->super->sig, newfs->super->blocksize, newfs->super->fatnum);
 	
 	char signature[8] = "ECS150FS";
 	if(strcmp(newfs->super->sig, signature) != 0)
@@ -66,26 +67,38 @@ int fs_malloc()
 	if((newfs->super->fatnum + 2 + newfs->super->datablocknum) != newfs->super->blocksize)
 	{
 		printf("Error Block Size and Fatnum + Root + Super + Data Block Size are not equal. \n");
-		return -1;
+		return NULL;
 	}
 	
-	uint16_t index = 1;
-	newfs->fat[0] = (struct fatblock *) malloc(sizeof(struct fatblock) * newfs->super->fatnum);
-	while(index < newfs->super->rootindex)
+	uint16_t blockindex = 1;
+	size_t diskindex = 1;
+
+	//Malloc for the fatblocks
+	newfs->fat = (struct fatblock **) malloc(sizeof(struct fatblock *) * newfs->super->fatnum);
+	for(uint16_t i=0; i<newfs->super->fatnum; i++)
 	{
-		printf("Trying to insert fatblock %d rootindex is %d \n", index-1,newfs->super->rootindex);
-		block_read(index, buffer);
-		newfs->fat[index-1] = buffer;
-		index++;
-		printf("Trying to insert fatblock %d rootindex is %d \n", index-1,newfs->super->rootindex);
+		newfs->fat[i] = (struct fatblock *) malloc(sizeof(struct fatblock));
+		printf("Allocated memory for fatblock %d\n", i);
+	}
+	while(blockindex < newfs->super->rootindex)
+	{
+		printf("Trying to insert fatblock %d rootindex is %d \n", blockindex-1,newfs->super->rootindex);
+		block_read(diskindex, newfs->fat[blockindex-1]);
+		printf("If buffer were casted to a fatblock the first entry would be: %d\n", newfs->fat[blockindex-1]->word[0]);
+		diskindex++;
+		//newfs->fat[index-1] = (struct fatblock *) malloc(sizeof(struct fatblock));
+		blockindex++;
 	} // iterate through each fat and insert into fs
-	block_read(index++, (void *) newfs->root);
-	return 0;
+	newfs->root = (struct rootblock *) malloc(sizeof(struct rootblock));
+	block_read(blockindex++, newfs->root);
+	newfs->data = (struct datablock **) malloc(sizeof(struct datablock *) * newfs->super->datablocknum);
 	for(int i = 0; i < newfs->super->datablocknum; i++)
 	{
-		block_read(index++, newfs->data[i]);
+		newfs->data[i] = (struct datablock *) malloc(BLOCK_SIZE);
+		block_read(diskindex++, newfs->data[i]);
+		printf("Allocated memory for datablock %d\n", i);
 	} // iterate through each datablock and insert into fs
-	return 0;
+	return newfs;
 }
 
 int fs_mount(const char *diskname)
@@ -101,7 +114,8 @@ int fs_mount(const char *diskname)
 		printf("TRYING TO MOUNT \n");
 		
 		//Make a superblock *
-		if(fs_malloc() == -1)
+		fs = fs_malloc();
+		if(fs_malloc() == NULL)
 		{
 			return -1;
 		}
@@ -115,6 +129,9 @@ int fs_umount(void)
 {
 	/* TODO: Phase 1 */
 	// make null all associations between file system and drive
+	// for(int i = 0; i < fs->super )
+	// fs->super = NULL:
+	// free(fs->super);
 	// block_disk_close()
 	return 0;	
 }
@@ -138,7 +155,7 @@ int fs_getfreefiles()
 }
 int fs_info(void)
 {
-	//printf("super->sig is %s \n", fs->super->sig);
+	printf("super->sig is %s \n", fs->super->sig);
 	// printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
 	// 	fs->super->blocksize,
 	// 	fs->super->fatnum,
