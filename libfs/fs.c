@@ -12,8 +12,8 @@
 //uint64_t
 struct __attribute__ ((__packed__)) filedescriptor {
 	char name[16];
-	uint64_t size;
-	uint32_t startindex;
+	uint32_t size;
+	uint16_t startindex;
 	char padding[10];
 }; //File descriptor stores meta data for each file in root
 struct __attribute__ ((__packed__)) superblock  {
@@ -58,10 +58,10 @@ struct fsys * fs_malloc()
 	printf("super signature is: %s, super blocksize is: %d, fatnum is: %d\n", newfs->super->sig, newfs->super->blocksize, newfs->super->fatnum);
 	
 	char signature[8] = "ECS150FS";
-	if(strcmp(newfs->super->sig, signature) != 0)
+	if(strncmp(newfs->super->sig, signature, 8) != 0)
 	{
 		printf("Error Signature does not equal ECS150FS \n");
-		//return NULL;
+		return NULL;
 	}
 	if((newfs->super->fatnum + 2 + newfs->super->datablocknum) != newfs->super->blocksize)
 	{
@@ -81,9 +81,9 @@ struct fsys * fs_malloc()
 	}
 	while(blockindex < newfs->super->rootindex)
 	{
-		printf("Trying to insert fatblock %d rootindex is %d \n", blockindex-1,newfs->super->rootindex);
+		//printf("Trying to insert fatblock %d rootindex is %d \n", blockindex-1,newfs->super->rootindex);
 		block_read(diskindex, newfs->fat[blockindex-1]);
-		printf("If buffer were casted to a fatblock the first entry would be: %d\n", newfs->fat[blockindex-1]->word[0]);
+		//printf("If buffer were casted to a fatblock the first entry would be: %d\n", newfs->fat[blockindex-1]->word[0]);
 		diskindex++;
 		//newfs->fat[index-1] = (struct fatblock *) malloc(sizeof(struct fatblock));
 		blockindex++;
@@ -149,18 +149,18 @@ int fs_umount(void)
 			if(block_write(diskindex++, temp) == -1)
 				return -1; // if blockwrite fails 
 			free(temp); // Free the fatblock * one by one
-			printf("Freed fatblock #%d \n",fatindex);
+			// printf("Freed fatblock #%d \n",fatindex);
 			index++;
 			continue;
 		} // Write the fat blocks 
 		if(index == fs->super->rootindex)
 		{
 			free(fs->fat); // Free the fatblock **
-			printf("Free fat list \n");
+			// printf("Free fat list \n");
 			if(block_write(diskindex++, fs->root) == -1)
 				return -1; // if blockwrite fails 
 			free(fs->root); // Free the rootblock *
-			printf("Freed rootblock \n");
+			// printf("Freed rootblock \n");
 			index++;
 			continue;
 		} // Write the root block into disk and free
@@ -170,18 +170,18 @@ int fs_umount(void)
 			if(block_write(diskindex++, temp) == -1)
 				return -1; // if blockwrite fails 
 			free(temp); // Free datablock * one by one
-			printf("Freed datablock #%d \n",dataindex);
+			// printf("Freed datablock #%d \n",dataindex);
 			index++;
 			continue;
  		} // Write the data blocks 
 
 	}
 	free(fs->data);
-	printf("Freed data list \n");
+	//printf("Freed data list \n");
 	free(fs->super);
-	printf("Freed superblock \n");
+	//printf("Freed superblock \n");
 	free(fs);
-	printf("Freed filesystem \n");
+	//printf("Freed filesystem \n");
 	return 0;	
 }
 int fs_getfreefat()
@@ -235,16 +235,43 @@ int fs_info(void)
 
 int fs_create(const char *filename)
 {
+	//Find the first empty entry in root
+	//struct filedescriptor * given = fs_findemptyfd();
+	//Return -1 if no empty fd found
+	// given->name = filename
+	// given->size = 0;
+	// given->startindex = FAT_EOC;
+
 	return 0;	/* TODO: Phase 2 */
 }
 
 int fs_delete(const char *filename)
 {
+	//struct filedescriptor * given = fs_findfd(filename)
+	//strncmp 
+	//if given->size == 0
+	//then given->startindex should equal FAT_EOC
+	//if so given-> = '\0' no problem
+	//if given->size > 0
+	//if given->startindex != FAT_EOC
+	//if given->startindex < 2048 we are in fat[0][startindex]
+	//if given->startindex > 2047 we are in fat[1][startindex-2048]
+	//if given->startindex > 4095 we are in fat[2][startindex-4096]
+	//if given->startindex > 6143 we are in fat[3][startindex-6144]
+	// SET x to the fat block index SET y to the fat word index
+	//While the current fatword != FAT_EOC we clean datablock by assigning NULL and fat word is set to 0 
+	//clean fs->data[given->startindex], find next datablock and clean fs->fat[x][y]
+	//WE HAVE TO CLEAN ALL DATABLOCKS AND THE FAT
+	//Start by using given startindex to find the fatword
 	return 0;	/* TODO: Phase 2 */
 }
 
 int fs_ls(void)
 {
+	//for(int i = 0; i<128; i++)
+	//struct filedescripto * given = fs->root->entry[i];
+	//if(given->name[0] != '\0')
+	//	print given->
 	return 0;	/* TODO: Phase 2 */
 }
 
