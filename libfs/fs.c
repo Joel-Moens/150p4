@@ -33,14 +33,10 @@ struct __attribute__ ((__packed__)) rootblock {
 	// Contains an entry for each file of fs
 	struct filedescriptor entry[128];
 }; //Block that stores all 128 fd
-struct __attribute__ ((__packed__))  datablock {
-	void * memory;
-}; //block that stores file data
 struct __attribute__ ((__packed__)) fsys {
 	struct superblock * super;
 	struct fatblock ** fat;
 	struct rootblock * root;
-	struct datablock ** data;
 }; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of datablocks
 
 //Pointer to the filesystem we will malloc when we mount a disk
@@ -55,7 +51,6 @@ struct fsys * fs_malloc()
 	// Malloc a temp fsys pointer for the filesystem 
 	block_read(0, newfs->super);
 	// Malloc the superblock pointer for the superblock point to buffer
-	printf("super signature is: %s, super blocksize is: %d, fatnum is: %d\n", newfs->super->sig, newfs->super->blocksize, newfs->super->fatnum);
 	
 	char signature[8] = "ECS150FS";
 	if(strncmp(newfs->super->sig, signature, 8) != 0)
@@ -71,7 +66,6 @@ struct fsys * fs_malloc()
 	
 	uint16_t blockindex = 1;
 	size_t diskindex = 1;
-
 	//Malloc for the fatblocks
 	newfs->fat = (struct fatblock **) malloc(sizeof(struct fatblock *) * newfs->super->fatnum);
 	for(uint16_t i=0; i<newfs->super->fatnum; i++)
@@ -90,13 +84,6 @@ struct fsys * fs_malloc()
 	} // iterate through each fat and insert into fs
 	newfs->root = (struct rootblock *) malloc(sizeof(struct rootblock));
 	block_read(blockindex++, newfs->root);
-	newfs->data = (struct datablock **) malloc(sizeof(struct datablock *) * newfs->super->datablocknum);
-	for(int i = 0; i < newfs->super->datablocknum; i++)
-	{
-		newfs->data[i] = (struct datablock *) malloc(BLOCK_SIZE);
-		block_read(diskindex++, newfs->data[i]);
-		//printf("Allocated memory for datablock %d\n", i);
-	} // iterate through each datablock and insert into fs
 	return newfs;
 }
 
@@ -130,10 +117,9 @@ int fs_umount(void)
 	/* TODO: Phase 1 */
 	printf("TRYING TO UMOUNT \n");
 	int index = 0;
-	int dataindex = 0;
 	int fatindex = 0;
 	size_t diskindex = 0;
-	while(index != block_disk_count())
+	while(index != fs->super->rootindex+1)
 	{
 		if(index == 0)
 		{
@@ -164,20 +150,8 @@ int fs_umount(void)
 			index++;
 			continue;
 		} // Write the root block into disk and free
-		else
-		{
-			struct datablock * temp = fs->data[dataindex++];
-			if(block_write(diskindex++, temp) == -1)
-				return -1; // if blockwrite fails 
-			free(temp); // Free datablock * one by one
-			// printf("Freed datablock #%d \n",dataindex);
-			index++;
-			continue;
- 		} // Write the data blocks 
 
 	}
-	free(fs->data);
-	//printf("Freed data list \n");
 	free(fs->super);
 	//printf("Freed superblock \n");
 	free(fs);
