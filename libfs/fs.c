@@ -28,6 +28,7 @@ struct __attribute__ ((__packed__)) superblock  {
 struct openfile {
 	FILE * pointer;
 	size_t offset;
+	int file_d;
 }; // pointer to actual file, offset where we are reading from file;
 struct __attribute__ ((__packed__)) fatblock {
 	uint16_t word[2048];
@@ -230,7 +231,7 @@ int fs_findfd(const char *filename)
 int fs_info(void)
 {
 	printf("super->sig is %s \n", fs->super->sig);
-	 printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
+  	printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
 	 	fs->super->blocksize,
 	 	fs->super->fatnum,
 	 	fs->super->rootindex,
@@ -270,17 +271,20 @@ int fs_delete(const char *filename)
 		return -1;
 	// removes file from file system
 	struct filedescriptor * given = &(fs->root->entry[status]);
-	void *delete_ptr = malloc(4096);
 	if ((given->size == 0) && (given->startindex == FAT_EOC))
 	{
-		block_write(((FAT_EOC)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
+		memset(&given->name[0],0,sizeof(given->name));
 		return 0;
 	}
 	// we need to find out where in FAT our file info is stored
+	void *delete_ptr = malloc(4096);
 	int x = 0, y = 0;
 	int fatblock = given->startindex % 2048;
 	x = fatblock;
 	y = given->startindex - (2048*fatblock);
+	memset(&given->name[0],0,sizeof(given->name));
+	given->size = 0;
+	given->startindex = FAT_EOC;
 	// looping through disk and FAT to clear data
 	while ((fs->fat[x])->word[y] != FAT_EOC)
 	{
@@ -293,6 +297,7 @@ int fs_delete(const char *filename)
 	// one last block_write to clean FAT_EOC root/disk
 	(fs->fat[x])->word[y] = 0;
 	block_write(y + fs->super->dataindex,delete_ptr);
+	free(delete_ptr);
 	return 0;	/* TODO: Phase 2 */
 }
 
@@ -308,73 +313,106 @@ int fs_ls(void)
 	return 0;	/* TODO: Phase 2 */
 }
 
+// helper function to find first empty file in files
+int fs_findemptyfile()
+{
+	for (int i = 0; i < 32; i++)
+	{
+		// return index of where we have an empty entry
+		if (!(fs->files[i]))
+			return i;
+	}	
+	return -1;
+}
+
+// helper function to find matching file descriptor in files
+int fs_findfilefd(int fd)
+{
+	for (int i = 0; i < 32; i++)
+	{
+		// check if file has been malloc'ed
+		if (fs->files[i])
+		{
+			// return index of where we have match
+			if ((fs->files[i])->file_d == fd)
+				return i;
+		}
+	}	
+	return -1;
+}
+
 int fs_open(const char *filename)
 {
+	// already 32 open files cannot open another
 	if(fs->ofnum == 32)
-	{
 		return -1;
-	} // already 32 open files cannot open another
-	/*
-	Akshay you will have to iterate through the fs->files to find one that has not been malloced then malloc
-	fs->files[index] = (struct openfile *) malloc(sizeof(struct openfile));	
-	// malloc space for an openfile * 
-	(fs->files[index])->pointer = fopen(filename, "r+");
-	// set this openfile pointer to the return fd by opening filename
-	(fs->files[index])->offset = 0;
-	// set offset to 0
+	int status = fs_findemptyfile();
+	// could not find an empty file, ERROR
+	if (status == -1)
+		return status;
+	fs->files[status] = (struct openfile *) malloc(sizeof(struct openfile));
+	(fs->files[status])->pointer = fopen(filename, "r+");
+	(fs->files[status])->offset = 0;
+	(fs->files[status])->file_d = fileno((fs->files[status])->pointer);
+	// if file can't be opened
 	if((fs->files[fs->ofnum])->pointer == NULL)
-	{
 		return -1;
-	} // file couldn't be opened, problem return -1
 	fs->ofnum++;
-	//increment # of openfiles
-	*/
 
 	return 0;	/* TODO: Phase 3 */
 }
 
 int fs_close(int fd)
 {
+	// no files open, cannot close any
 	if(fs->ofnum == 0)
-	{
 		return -1;
-	} // no file to close error
-	/* 
-	Akshay loop through the openfiles until you find the given fd
-	close the file, remove association to fd then free the openfile 
-	*/
-	for(int i = 0; i < 32; i++)
-	{
-		if(fs->files[i] != NULL)
-		{
-			if((fs->files[i])->pointer == fd)
-			{
-				fclose(fd);
-				(fs->files[i])->pointer = NULL;
-
-				free(fs->files[i]);
-			} // this openfile is the file we are trying to close
-		} // this openfile has been malloced
-	}
+	int status = fs_findfilefd(fd);
+	// could not find file descriptor, ERROR
+	if (status == -1)
+		return status;
+	fclose((fs->files[status])->pointer);
+	(fs->files[status])->pointer = NULL;
+	free(fs->files[status]);
+	fs->ofnum--;
+	
 	return 0;	/* TODO: Phase 3 */
 }
 
 int fs_stat(int fd)
 {
-	/* 
-	Akshay loop through the openfiles until you find the given fd
-	get the details on the file size and print them out 
-	*/
-	return 0;	/* TODO: Phase 3 */
+	for (int i = 0; i < 32; i++)
+	{
+		// check if file has been malloc'ed
+		if (fs->files[i])
+		{
+			// we found a match
+			if ((fs->files[i])->file_d == fd)
+				return sizeof((fs->files[i])->pointer);
+		}
+	}	
+	return -1;	/* TODO: Phase 3 */
 }
 
 int fs_lseek(int fd, size_t offset)
 {
-	/* 
-	Akshay loop through the openfiles until you find the given fd
-	set the (fs->files[index])->offset to the given offset 
-	*/
-	return 0;	/* TODO: Phase 3 */
+	for (int i = 0; i < 32; i++)
+	{
+		// check if file has been malloc'ed
+		if (fs->files[i])
+		{
+			// check if offset is out of bounds
+			if (sizeof(offset) > sizeof((fs->files[i])->pointer))
+				return -1;
+			// we found a match
+			else if ((fs->files[i])->file_d == fd)
+			{
+				(fs->files[i])->offset = offset;
+				return 0;
+			}
+		}
+	}	
+	return -1;	/* TODO: Phase 3 */
 }
 
 int fs_write(int fd, void *buf, size_t count)
