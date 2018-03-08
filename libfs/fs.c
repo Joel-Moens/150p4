@@ -289,16 +289,16 @@ int fs_delete(const char *filename)
 		y = given->startindex - 6144;
 	}
 	// looping through disk and FAT to clear data
-	while (fs->fat[x][y] != FAT_EOC)
+	while ((fs->fat[x])->word[y] != FAT_EOC)
 	{
 		int old_y = y;
-		int new_y = fs->fat[x][y];
-		fs->fat[x][y] = 0;
+		int new_y = (fs->fat[x])->word[y];
+		(fs->fat[x])->word[y] = 0;
 		y = new_y;
 		block_write(((old_y)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
 	}
 	// one last block_write to clean FAT_EOC root/disk
-	fs->fat[x][y] = 0;
+	(fs->fat[x])->word[y] = 0;
 	block_write(((y)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
 	return 0;	/* TODO: Phase 2 */
 }
