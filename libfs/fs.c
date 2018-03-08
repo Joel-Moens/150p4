@@ -26,6 +26,7 @@ struct __attribute__ ((__packed__)) superblock  {
 	char padding[4079];
 }; //Stores most needed info about disk's
 struct openfile {
+	char name[16];
 	FILE * pointer;
 	size_t offset;
 	int file_d;
@@ -351,6 +352,7 @@ int fs_open(const char *filename)
 	if (status == -1)
 		return status;
 	fs->files[status] = (struct openfile *) malloc(sizeof(struct openfile));
+	strcpy((fs->files[status])->name,filename);
 	(fs->files[status])->pointer = fopen(filename, "r+");
 	(fs->files[status])->offset = 0;
 	(fs->files[status])->file_d = fileno((fs->files[status])->pointer);
@@ -414,6 +416,34 @@ int fs_lseek(int fd, size_t offset)
 	}	
 	return -1;	/* TODO: Phase 3 */
 }
+int fs_findblockindex(int entryindex, int blockindex)
+{
+	struct filedescriptor * given = &(fs->root->entry[entryindex]);
+	if(blockindex == 0)
+		return given->startindex;
+	int x = 0, y = 0;
+	int fatindex = given->startindex % 2048;
+	int wordindex = 0;
+	x = fatindex;
+	y = given->startindex - (2048*fatindex);
+	for(int i = 0; i < blockindex; i++)
+	{
+		wordindex = (fs->fat[x])->word[y];
+		if(wordindex == FAT_EOC)
+		{
+			return -1;
+		}
+		x = wordindex % 2048;
+		y = wordindex - (2048*fatindex);
+	}
+	 
+	return wordindex;
+
+} // Find the index of the data block corresponding to file offset
+int fs_addblock(int fd, size_t offset)
+{
+	return 0;
+}
 
 int fs_write(int fd, void *buf, size_t count)
 {
@@ -423,7 +453,44 @@ int fs_write(int fd, void *buf, size_t count)
 
 int fs_read(int fd, void *buf, size_t count)
 {
-	/* TODO: Phase 4 */
+	// /* TODO: Phase 4 */
+	// int ofindex = fs_findfilefd(fd);
+	// // Find the open file with fd
+	// int entryindex = fs_findfd((fs->files[ofindex])->name);
+	// // Find the entry in root using the openfile name
+	// int blockindex = (fs->files[ofindex])->offset % 4096;
+	// // mod the openfile offset to datablock size to find which file datablock to start at
+	// int dataindex = fs_findblockindex(entryindex, blockindex);
+	// find the first datablock in file to read from by using openfile offset
+	/*
+	Make a temporary void * readbuf that reads block by block
+	Num data blocks to read = (count + (fs->files[ofindex])->offset - (blockindex*4096)) % 4096
+	int readindex = 0;
+	while(dataindex != FAT_EOC && readindex < blocks2read)
+	{
+	Have a while loop that moves the readbuf to the offset and append to void *buf
+	find the next datablock linked in fat 
+	dataindex = fs_findblockindex(entryindex, ++blockindex);
+	if(block_read(dataindex + fs->super->dataindex, readbuf) == -1)
+		return -1;
+	append readbuf to buf
+	for the first block read
+	if(count > 4096 - offset)
+		count -= (4096-offset);
+		append all of readbuf to buf and read the next block
+	else if(count < 4096 - offset)
+		only append count # of bytes from readbuf to buf
+	for all subsequent block reads
+	if(count > 4096)
+		count -= 4096
+	else if(count < 4096)
+		only append count # of bytes from readbuf to buf
+	Then read any remaining datablocks until count bytes have been read
+
+	}
+	*/
+
+	// If dataindex == FAT_EOC 
 	return 0;
 }
 
