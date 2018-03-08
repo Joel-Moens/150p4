@@ -24,7 +24,11 @@ struct __attribute__ ((__packed__)) superblock  {
 	uint16_t datablocknum;
 	uint8_t fatnum;
 	char padding[4079];
-}; //Stores most needed info about disk
+}; //Stores most needed info about disk's
+struct openfile {
+	FILE * pointer;
+	size_t offset;
+}; // pointer to actual file, offset where we are reading from file;
 struct __attribute__ ((__packed__)) fatblock {
 	uint16_t word[2048];
 }; //Block that stores 2byte entries per datablock linking them if used in same file
@@ -37,7 +41,9 @@ struct __attribute__ ((__packed__)) fsys {
 	struct superblock * super;
 	struct fatblock ** fat;
 	struct rootblock * root;
-}; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of datablocks
+	struct openfile ** files;
+	int ofnum;
+}; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of openfiles and openfile num
 
 //Pointer to the filesystem we will malloc when we mount a disk
 static struct fsys * fs;
@@ -84,6 +90,8 @@ struct fsys * fs_malloc()
 	} // iterate through each fat and insert into fs
 	newfs->root = (struct rootblock *) malloc(sizeof(struct rootblock));
 	block_read(blockindex++, newfs->root);
+	newfs->files = (struct openfile **) malloc(sizeof(struct openfile*)*32);
+	newfs->ofnum = 0;
 	return newfs;
 }
 
@@ -193,19 +201,7 @@ int fs_getfreefiles()
 	}
 	return (128 - index);
 }
-int fs_info(void)
-{
-	printf("super->sig is %s \n", fs->super->sig);
-	 printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
-	 	fs->super->blocksize,
-	 	fs->super->fatnum,
-	 	fs->super->rootindex,
-	 	fs->super->dataindex,
-	 	fs->super->datablocknum,
-	 	fs_getfreefat(),fs->super->datablocknum,
-	 	fs_getfreefiles(), 128);
-	return 0;	/* TODO: Phase 1 */
-}
+
 
 // helper function to find first empty entry in root
 int fs_findemptyfd()
@@ -231,6 +227,20 @@ int fs_findfd(const char *filename)
 	return -1;
 }
 
+int fs_info(void)
+{
+	printf("super->sig is %s \n", fs->super->sig);
+	 printf("FS Info: \n total_blk_count=%d \n fat_blk_count=%d \n rdir_blk=%d \n data_blk=%d\n data_blk_count=%d\n fat_free_ratio=%d/%d\n rdir_free_ratio=%d/%d\n",
+	 	fs->super->blocksize,
+	 	fs->super->fatnum,
+	 	fs->super->rootindex,
+	 	fs->super->dataindex,
+	 	fs->super->datablocknum,
+	 	fs_getfreefat(),fs->super->datablocknum,
+	 	fs_getfreefiles(), 128);
+
+	return 0;	/* TODO: Phase 1 */
+}
 int fs_create(const char *filename)
 {
 	int status = fs_findemptyfd();
@@ -268,38 +278,21 @@ int fs_delete(const char *filename)
 	}
 	// we need to find out where in FAT our file info is stored
 	int x = 0, y = 0;
-	if (given->startindex < 2048)
-	{
-		x = 0;
-		y = given->startindex;
-	}
-	else if (given->startindex < 4096)
-	{
-		x = 1;
-		y = given->startindex - 2048;
-	}
-	else if (given->startindex < 6144)
-	{
-		x = 2;
-		y = given->startindex - 4096;
-	}
-	else if (given->startindex < 8192)
-	{
-		x = 3;
-		y = given->startindex - 6144;
-	}
+	int fatblock = given->startindex % 2048;
+	x = fatblock;
+	y = given->startindex - (2048*fatblock);
 	// looping through disk and FAT to clear data
 	while ((fs->fat[x])->word[y] != FAT_EOC)
 	{
 		int old_y = y;
 		int new_y = (fs->fat[x])->word[y];
 		(fs->fat[x])->word[y] = 0;
+		block_write(old_y + fs->super->dataindex,delete_ptr);
 		y = new_y;
-		block_write(((old_y)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
-	}
+	} // While the current word in the chain doesn't equal FAT_EOC empty the data block associated with word
 	// one last block_write to clean FAT_EOC root/disk
 	(fs->fat[x])->word[y] = 0;
-	block_write(((y)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
+	block_write(y + fs->super->dataindex,delete_ptr);
 	return 0;	/* TODO: Phase 2 */
 }
 
@@ -317,21 +310,70 @@ int fs_ls(void)
 
 int fs_open(const char *filename)
 {
+	if(fs->ofnum == 32)
+	{
+		return -1;
+	} // already 32 open files cannot open another
+	/*
+	Akshay you will have to iterate through the fs->files to find one that has not been malloced then malloc
+	fs->files[index] = (struct openfile *) malloc(sizeof(struct openfile));	
+	// malloc space for an openfile * 
+	(fs->files[index])->pointer = fopen(filename, "r+");
+	// set this openfile pointer to the return fd by opening filename
+	(fs->files[index])->offset = 0;
+	// set offset to 0
+	if((fs->files[fs->ofnum])->pointer == NULL)
+	{
+		return -1;
+	} // file couldn't be opened, problem return -1
+	fs->ofnum++;
+	//increment # of openfiles
+	*/
+
 	return 0;	/* TODO: Phase 3 */
 }
 
 int fs_close(int fd)
 {
+	if(fs->ofnum == 0)
+	{
+		return -1;
+	} // no file to close error
+	/* 
+	Akshay loop through the openfiles until you find the given fd
+	close the file, remove association to fd then free the openfile 
+	*/
+	for(int i = 0; i < 32; i++)
+	{
+		if(fs->files[i] != NULL)
+		{
+			if((fs->files[i])->pointer == fd)
+			{
+				fclose(fd);
+				(fs->files[i])->pointer = NULL;
+
+				free(fs->files[i]);
+			} // this openfile is the file we are trying to close
+		} // this openfile has been malloced
+	}
 	return 0;	/* TODO: Phase 3 */
 }
 
 int fs_stat(int fd)
 {
+	/* 
+	Akshay loop through the openfiles until you find the given fd
+	get the details on the file size and print them out 
+	*/
 	return 0;	/* TODO: Phase 3 */
 }
 
 int fs_lseek(int fd, size_t offset)
 {
+	/* 
+	Akshay loop through the openfiles until you find the given fd
+	set the (fs->files[index])->offset to the given offset 
+	*/
 	return 0;	/* TODO: Phase 3 */
 }
 
