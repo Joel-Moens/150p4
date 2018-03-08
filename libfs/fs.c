@@ -115,7 +115,7 @@ int fs_mount(const char *diskname)
 int fs_umount(void)
 {
 	/* TODO: Phase 1 */
-	printf("TRYING TO UMOUNT \n");
+	printf("TRYING TO UNMOUNT \n");
 	int index = 0;
 	int fatindex = 0;
 	size_t diskindex = 0;
@@ -207,45 +207,111 @@ int fs_info(void)
 	return 0;	/* TODO: Phase 1 */
 }
 
+// helper function to find first empty entry in root
+int fs_findemptyfd()
+{
+	for (int i = 0; i < 128; i++)
+	{
+		// return index of where we have an empty entry
+		if (fs->root->entry[i].name[0] == '\0')
+			return i;
+	}	
+	return -1;
+}
+
+// helper function to find matching filename in root
+int fs_findfd(const char *filename)
+{
+	for (int i = 0; i < 128; i++)
+	{
+		// return index of where we have a matching filename
+		if (strncmp(filename,fs->root->entry[i].name,16))
+			return i;
+	}	
+	return -1;
+}
+
 int fs_create(const char *filename)
 {
-	//Find the first empty entry in root
-	//struct filedescriptor * given = fs_findemptyfd();
-	//Return -1 if no empty fd found
-	// given->name = filename
-	// given->size = 0;
-	// given->startindex = FAT_EOC;
-
+	int status = fs_findemptyfd();
+	// if we can't find an empty entry in root, fail
+	if (status == -1)
+		return status;
+	// if our filename is too large or isn't NULL-terminated or already exists in root, fail
+	if ((sizeof(*filename) > 16) || (filename[-1] != '\0') || (fs_findfd(filename) != -1)) 
+		return -1;
+	// adds file into file system 
+	struct filedescriptor * given = &(fs->root->entry[status]);
+	strcpy(given->name,filename);
+	given->size = 0;
+	given->startindex = FAT_EOC;
 	return 0;	/* TODO: Phase 2 */
 }
 
 int fs_delete(const char *filename)
 {
-	//struct filedescriptor * given = fs_findfd(filename)
-	//strncmp 
-	//if given->size == 0
-	//then given->startindex should equal FAT_EOC
-	//if so given-> = '\0' no problem
-	//if given->size > 0
-	//if given->startindex != FAT_EOC
-	//if given->startindex < 2048 we are in fat[0][startindex]
-	//if given->startindex > 2047 we are in fat[1][startindex-2048]
-	//if given->startindex > 4095 we are in fat[2][startindex-4096]
-	//if given->startindex > 6143 we are in fat[3][startindex-6144]
-	// SET x to the fat block index SET y to the fat word index
-	//While the current fatword != FAT_EOC we clean datablock by assigning NULL and fat word is set to 0 
-	//clean fs->data[given->startindex], find next datablock and clean fs->fat[x][y]
-	//WE HAVE TO CLEAN ALL DATABLOCKS AND THE FAT
-	//Start by using given startindex to find the fatword
+	// we will have to add check for file being currently open, return -1 if so
+	int status = fs_findfd(filename);
+	// if we can't find the filename in root, fail
+	if (status == -1)
+		return status;
+	// if our filename is too large or isn't NULL-terminated, fail 
+	if ((sizeof(*filename) > 16) || (filename[-1] != '\0')) 
+		return -1;
+	// removes file from file system
+	struct filedescriptor * given = &(fs->root->entry[status]);
+	void *delete_ptr = malloc(4096);
+	if ((given->size == 0) && (given->startindex == FAT_EOC))
+	{
+		block_write(((FAT_EOC)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
+		return 0;
+	}
+	// we need to find out where in FAT our file info is stored
+	int x = 0, y = 0;
+	if (given->startindex < 2048)
+	{
+		x = 0;
+		y = given->startindex;
+	}
+	else if (given->startindex < 4096)
+	{
+		x = 1;
+		y = given->startindex - 2048;
+	}
+	else if (given->startindex < 6144)
+	{
+		x = 2;
+		y = given->startindex - 4096;
+	}
+	else if (given->startindex < 8192)
+	{
+		x = 3;
+		y = given->startindex - 6144;
+	}
+	// looping through disk and FAT to clear data
+	while (fs->fat[x][y] != FAT_EOC)
+	{
+		int old_y = y;
+		int new_y = fs->fat[x][y];
+		fs->fat[x][y] = 0;
+		y = new_y;
+		block_write(((old_y)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
+	}
+	// one last block_write to clean FAT_EOC root/disk
+	fs->fat[x][y] = 0;
+	block_write(((y)+(fs->super->fatnum)+(2*(sizeof(struct superblock)+sizeof(struct rootblock)))),delete_ptr);
 	return 0;	/* TODO: Phase 2 */
 }
 
 int fs_ls(void)
 {
-	//for(int i = 0; i<128; i++)
-	//struct filedescripto * given = fs->root->entry[i];
-	//if(given->name[0] != '\0')
-	//	print given->
+	// need to check if no underlying virtual disk was opened, return -1 if so
+	// also need to match test_ref's output
+	for (int i = 0; i < 128; i++)
+	{
+		if (fs->root->entry[i].name[0] != '\0')
+			printf("%s",fs->root->entry[i].name);
+	}	
 	return 0;	/* TODO: Phase 2 */
 }
 
