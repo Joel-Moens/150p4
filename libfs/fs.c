@@ -53,6 +53,31 @@ struct __attribute__ ((__packed__)) fsys {
 static struct fsys * fs;
 //fs was going to be our filesystem that we use for this entire project, but trying to test out each component to see what the problem is
 /* TODO: Phase 1 */
+int fs_iteratefat()
+{
+	int count = 0;
+	for(int x = 0; x < fs->super->fatnum; x++)
+	{
+		for(int y = 0; y < 2048; y++)
+		{
+			if(fs->fat[x]->word[y] != 0)
+				count++;
+		} // iterate through fat word index
+	}// iterate through the fat block index
+	return count;
+} //iterate fat and return #usedata
+int fs_iterateroot()
+{
+	int count = 0;
+	for(int i = 0; i < 128; i++)
+	{
+		if(fs->root->entry[i].name[0] != '\0')
+		{
+			count++;
+		} // file has a name add to entries
+	}// iterate through the root entries
+	return count;
+} //iterate root and return #entries
 struct fsys * fs_malloc()
 {
 	// Malloc for a pointer that will read from disk
@@ -96,7 +121,7 @@ struct fsys * fs_malloc()
 	block_read(blockindex++, newfs->root);
 	newfs->files = (struct openfile **) malloc(sizeof(struct openfile*)*32);
 	newfs->ofnum = 0;
-	newfs->usedata = 1;
+	newfs->usedata = 0;
 	newfs->entries = 0;
 	return newfs;
 }
@@ -120,6 +145,8 @@ int fs_mount(const char *diskname)
 		{
 			return -1;
 		}
+		fs->usedata = fs_iteratefat();
+		fs->entries = fs_iterateroot();
 		//Make a fatblock *
 		//Make a rootblock *
 		return 0;
@@ -238,8 +265,8 @@ int fs_info(void)
 	 	fs->super->rootindex,
 	 	fs->super->dataindex,
 	 	fs->super->datablocknum,
-	 	fs->usedata,fs->super->datablocknum,
-	 	fs->entries, 128);
+	 	fs->super->datablocknum-fs->usedata,fs->super->datablocknum,
+	 	128-fs->entries, 128);
 
 	return 0;	/* TODO: Phase 1 */
 }
@@ -292,10 +319,10 @@ int fs_delete(const char *filename)
 	// we need to find out where in FAT our file info is stored
 	void *delete_ptr = malloc(BLOCK_SIZE);
 	int x = 0, y = 0;
-	int fatblock = given->startindex % 2048;
+	y = given->startindex % 2048; // find word index 
+	int fatblock = (given->startindex - y)/2048; // find fatblock index
 	printf("Given startindex is %d \n", given->startindex);
 	x = fatblock;
-	y = given->startindex - (2048*fatblock);
 	memcpy(given->name, empty, 16);
 	//What are we doing here ^ ^ ^??
 	given->size = 0;
@@ -458,13 +485,12 @@ int fs_findblockindex(int entryindex, int blockindex)
 	//if blockindex == 0 then we return the index to the first data block
 	// otherwise we use the fat chain to find the correct datablock based on blockindex
 	int x = 0, y = 0;
-	int fatindex = given->startindex % 2048;
+	y =  given->startindex % 2048; // y is startindex%2048
+	int fatindex =  (given->startindex - y) / 2048;
 	// Find the fatblock to search through
 	int wordindex = 0;
 	x = fatindex;
 	// x equals fat block index
-	y = given->startindex - (2048*fatindex);
-	// y equals word index in fat block
 	for(int i = 0; i < blockindex; i++)
 	{
 		wordindex = (fs->fat[x])->word[y];
@@ -472,8 +498,8 @@ int fs_findblockindex(int entryindex, int blockindex)
 		{
 			return -1;
 		} // the offset is trying to read past allocated datablock
-		x = wordindex % 2048;
-		y = wordindex - (2048*fatindex);
+		y = wordindex % 2048;
+		x = (wordindex - y) / 2048;
 	} // Move along the chain until the correct data block index is found
 	 
 	return wordindex;
@@ -518,8 +544,8 @@ int fs_addblock(int entryindex, int blockindex)
 			return -1;
 		} // No free blocks left to be allocated 
 		//Find the fat block we are searching through
-		fatindex = given->startindex % 2048;
-		windex = given->startindex - (2048*fatindex);
+		windex = given->startindex % 2048;
+		fatindex = (given->startindex - windex) / 2048;
 		(fs->fat[fatindex])->word[windex] = FAT_EOC;
 		fs->usedata++; //Using another datablock
 		//Assign given->startindex to the empty data block index in the fat array
@@ -531,15 +557,15 @@ int fs_addblock(int entryindex, int blockindex)
 	} //if blockindex == 0 then we return the index to the first data block
 	// otherwise we use the fat chain to find the correct datablock based on blockindex
 	int x = 0, y = 0;
-	fatindex = given->startindex % 2048;
+	y = given->startindex % 2048;
+	fatindex = (given->startindex - y) / 2048;
 	// Find the fatblock to search through
 	int wordindex = 0;
 	x = fatindex;
 	// x equals fat block index
-	y = given->startindex - (2048*fatindex);
-	// y equals word index in fat block
 	for(int i = 0; i < blockindex; i++)
 	{
+		printf("Fat index is: %d , Word index is: %d \n", x, y);
 		wordindex = (fs->fat[x])->word[y];
 		if(wordindex == FAT_EOC)
 		{
@@ -551,16 +577,16 @@ int fs_addblock(int entryindex, int blockindex)
 			else
 			{
 				(fs->fat[x])->word[y] = wordindex; // Attach the new word to the file block chain
-				x = wordindex % 2048; // Fatblock is equal to the wordindex mod 2048
-				y = wordindex - (2048*x); // Index in fatblock equal to wordindex - (fatblockindex * 2048)
+				y = wordindex % 2048; // Fatblock is equal to the wordindex mod 2048
+				x = (wordindex - y) / 2048; // Index in fatblock equal to wordindex - (fatblockindex * 2048)
 				(fs->fat[x])->word[y] = FAT_EOC; // Make the new block added equal to fat eoc
 				fs->usedata++;
 			} // Fat word linked to next empty fat index
 		} // If the next word in the chain is FAT_EOC we need to keep adding
 		else
 		{
-			x = wordindex % 2048; // Fatblock is equal to the wordindex mod 2048
-			y = wordindex - (2048*x); // Index in fatblock equal to wordindex - (fatblockindex * 2048)	
+			y = wordindex % 2048; // Fatblock is equal to the wordindex mod 2048
+			x = (wordindex - y) / 2048; // Index in fatblock equal to wordindex - (fatblockindex * 2048)	
 		}
 		
 	} // Move along the chain until the correct data block index is found
@@ -570,17 +596,7 @@ int fs_addblock(int entryindex, int blockindex)
 
 int fs_write(int fd, void *buf, size_t count)
 {
-	/* 
-	TODO: Phase 4
-	Yo Akshay this is going to be super similar to fs_read, 
-	the one thing is we have to look at the given filedescriptor in root 
-	and see if there is a datablock associated with the file
-	if there isn't we have to add a block to the file and set it to given->startindex
-	we then set the associated fat word for this data block equal to FAT_EOC
 
-	if root has a given->startindex, but we are writing passed allocated space
-	then we have to add a datablock, but append to our current fat list and make this datablock word = FAT_EOC
-	 */
 	size_t byteread = 0;
 	int ofindex = fs_findfilefd(fd);
 	if(ofindex == -1)
