@@ -45,6 +45,7 @@ struct __attribute__ ((__packed__)) fsys {
 	struct rootblock * root;
 	struct openfile ** files;
 	int ofnum;
+	int usedata;
 }; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of openfiles and openfile num
 
 //Pointer to the filesystem we will malloc when we mount a disk
@@ -94,6 +95,7 @@ struct fsys * fs_malloc()
 	block_read(blockindex++, newfs->root);
 	newfs->files = (struct openfile **) malloc(sizeof(struct openfile*)*32);
 	newfs->ofnum = 0;
+	newfs->usedata = 1;
 	return newfs;
 }
 
@@ -108,7 +110,7 @@ int fs_mount(const char *diskname)
 	}
 	else
 	{
-		printf("TRYING TO MOUNT \n");
+		//printf("TRYING TO MOUNT \n");
 		
 		//Make a superblock *
 		fs = fs_malloc();
@@ -125,7 +127,7 @@ int fs_mount(const char *diskname)
 int fs_umount(void)
 {
 	/* TODO: Phase 1 */
-	printf("TRYING TO UNMOUNT \n");
+	//printf("TRYING TO UNMOUNT \n");
 	int index = 0;
 	int fatindex = 0;
 	size_t diskindex = 0;
@@ -184,12 +186,12 @@ int fs_getfreefat()
 		if(wordindex < 2048)
 		{
 			wordindex++;			
-		}
+		} //Still inside fat block keep moving along words
 		else
 		{
 			wordindex = 0;
 			blockindex++;
-		}
+		} //Passed this fat block move on to the next and reset wordindex;
 
 	}
 	return (fs->super->datablocknum - (wordindex + (blockindex * 2048)));
@@ -222,9 +224,13 @@ int fs_findfd(const char *filename)
 {
 	for (int i = 0; i < 128; i++)
 	{
+		//printf("Trying to find the root entry with name %s \n", filename);
 		// return index of where we have a matching filename
-		if (strncmp(filename,fs->root->entry[i].name,16))
+		if (strncmp(filename,fs->root->entry[i].name,16) == 0)
+		{
+			printf("Name match --> %s == %s <-- \n", filename, fs->root->entry[i].name);
 			return i;
+		}
 	}	
 	return -1;
 }
@@ -246,17 +252,22 @@ int fs_info(void)
 int fs_create(const char *filename)
 {
 	int status = fs_findemptyfd();
+	printf("Inside fs_create \n status of empty fd is : %d \n", status);
 	// if we can't find an empty entry in root, fail
 	if (status == -1)
 		return status;
 	// if our filename is too large or isn't NULL-terminated or already exists in root, fail
 	if ((sizeof(*filename) > 16) || (filename[-1] != '\0') || (fs_findfd(filename) != -1)) 
+	{
+		printf("Inside fs_create \n status of finding fd is : %d \n", fs_findfd(filename));
 		return -1;
+	}
 	// adds file into file system 
 	struct filedescriptor * given = &(fs->root->entry[status]);
 	strcpy(given->name,filename);
 	given->size = 0;
 	given->startindex = FAT_EOC;
+	printf("File created at root entry: %d, with name %s \n",status,filename);
 	return 0;	/* TODO: Phase 2 */
 }
 
@@ -281,6 +292,7 @@ int fs_delete(const char *filename)
 	void *delete_ptr = malloc(BLOCK_SIZE);
 	int x = 0, y = 0;
 	int fatblock = given->startindex % 2048;
+	printf("Given startindex is %d \n", given->startindex);
 	x = fatblock;
 	y = given->startindex - (2048*fatblock);
 	memset(&given->name[0],0,sizeof(given->name));
@@ -294,6 +306,7 @@ int fs_delete(const char *filename)
 		int new_y = (fs->fat[x])->word[y];
 		// decrement the global # of used datablocks
 		(fs->fat[x])->word[y] = 0;
+		printf("Trying to write into block %d + %d with empty delete pointer\n", old_y, fs->super->dataindex);
 		block_write(old_y + fs->super->dataindex,delete_ptr);
 		y = new_y;
 	} // While the current word in the chain doesn't equal FAT_EOC empty the data block associated with word
@@ -308,10 +321,11 @@ int fs_ls(void)
 {
 	// need to check if no underlying virtual disk was opened, return -1 if so
 	// also need to match test_ref's output
+	printf("FS Ls:\n");
 	for (int i = 0; i < 128; i++)
 	{
 		if (fs->root->entry[i].name[0] != '\0')
-			printf("%s",fs->root->entry[i].name);
+			printf("file: %s, size: %d, data_blk: %d\n",fs->root->entry[i].name, fs->root->entry[i].size, fs->root->entry[i].startindex);
 	}	
 	return 0;	/* TODO: Phase 2 */
 }
@@ -334,9 +348,11 @@ int fs_findfilefd(int fd)
 	for (int i = 0; i < 32; i++)
 	{
 		// check if file has been malloc'ed
-		if (fs->files[i])
+		if (fs->files[i] != NULL)
 		{
 			// return index of where we have match
+			printf("Currently checking open file %d, it is not NULL, name is %s\n", i, fs->files[i]->name);
+			printf("Open file %d filenum %d is not equal to %d", i,(fs->files[i])->file_d, fd);
 			if ((fs->files[i])->file_d == fd)
 				return i;
 		}
@@ -362,8 +378,9 @@ int fs_open(const char *filename)
 	if((fs->files[fs->ofnum])->pointer == NULL)
 		return -1;
 	fs->ofnum++;
+	printf("Opened file %s in root, inside fs->files[%d] \n", filename, status);
 
-	return 0;	/* TODO: Phase 3 */
+	return (fs->files[status])->file_d;	/* TODO: Phase 3 */
 }
 
 int fs_close(int fd)
@@ -372,6 +389,7 @@ int fs_close(int fd)
 	if(fs->ofnum == 0)
 		return -1;
 	int status = fs_findfilefd(fd);
+	printf("Status = %d \n", status);
 	// could not find file descriptor, ERROR
 	if (status == -1)
 		return status;
@@ -388,11 +406,19 @@ int fs_stat(int fd)
 	for (int i = 0; i < 32; i++)
 	{
 		// check if file has been malloc'ed
+		FILE * fp;
 		if (fs->files[i])
 		{
+			
 			// we found a match
 			if ((fs->files[i])->file_d == fd)
-				return sizeof((fs->files[i])->pointer);
+			{
+				fp = (fs->files[i])->pointer;
+				fseek(fp, 0, SEEK_END);
+				int size = ftell(fp);
+				fseek(fp, 0, SEEK_SET);
+				return size;
+			}
 		}
 	}	
 	return -1;	/* TODO: Phase 3 */
@@ -488,12 +514,14 @@ int fs_addblock(int entryindex, int blockindex)
 		fatindex = given->startindex % 2048;
 		windex = given->startindex - (2048*fatindex);
 		(fs->fat[fatindex])->word[windex] = FAT_EOC;
+		fs->usedata++; //Using another datablock
 		//Assign given->startindex to the empty data block index in the fat array
 		//Assign index in the fat array to FAT_EOC
-	} // File descriptor is empty
+	} // File descriptor hasn't been written into yet, find the starting index set next word link to FAT_EOC and add to fs->usedata
 	if(blockindex == 0)
+	{
 		return given->startindex;
-	//if blockindex == 0 then we return the index to the first data block
+	} //if blockindex == 0 then we return the index to the first data block
 	// otherwise we use the fat chain to find the correct datablock based on blockindex
 	int x = 0, y = 0;
 	fatindex = given->startindex % 2048;
@@ -515,13 +543,21 @@ int fs_addblock(int entryindex, int blockindex)
 			} // No more empty data blocks
 			else
 			{
-				(fs->fat[x])->word[y] = wordindex;
+				(fs->fat[x])->word[y] = wordindex; // Attach the new word to the file block chain
+				x = wordindex % 2048; // Fatblock is equal to the wordindex mod 2048
+				y = wordindex - (2048*x); // Index in fatblock equal to wordindex - (fatblockindex * 2048)
+				(fs->fat[x])->word[y] = FAT_EOC; // Make the new block added equal to fat eoc
+				fs->usedata++;
 			} // Fat word linked to next empty fat index
 		} // If the next word in the chain is FAT_EOC we need to keep adding
-		x = wordindex % 2048;
-		y = wordindex - (2048*fatindex);
+		else
+		{
+			x = wordindex % 2048; // Fatblock is equal to the wordindex mod 2048
+			y = wordindex - (2048*x); // Index in fatblock equal to wordindex - (fatblockindex * 2048)	
+		}
+		
 	} // Move along the chain until the correct data block index is found
-	 
+	
 	return wordindex;
 }
 
@@ -631,6 +667,7 @@ int fs_write(int fd, void *buf, size_t count)
 	given->size += byteread;
 	(fs->files[ofindex])->offset += byteread; // Offset is moved to the number of bytes read
 	free(blockbuf);
+	printf("Wrote %d bytes to file\n", (int)byteread);
 	return byteread;	
 }
 
