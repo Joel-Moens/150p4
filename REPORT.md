@@ -13,25 +13,44 @@ We used the following data structures to implement Phase 0:
 * struct __attribute__ ((__packed__)) rootblock
 * struct __attribute__ ((__packed__)) fsys
 
-We envisioned *Data blocks* as all the remaining space on our disk. Our 
-*Superblock* stores pertinent information about our disk. Our *File Allocation 
-Table* stores 2-byte entries per data block and links them if they are part 
-of the same file. Our *Root directory* stores our 128 file descriptors. 
-Lastly, our *File System* struct allows us to access our other structs.
+Superblock struct *superblock* stores pertinent information about our disk, it
+is the table of contents for our file system. File Allocation Table is a
+list of struct *fatblock* and it stores 2-byte *word* per data block which link
+to one another if they are part of the same file. Our *Root directory* struct 
+*rootblock* stores our 128 file descriptors (Table of Contents for files on
+disk). Lastly, our *File System* struct fsys combines a *superblock*, list of
+*fatblocks*, and *rootblock*. We ensure that no extra memory is allocated in
+these structs by assigning them the __attribute__ ((__packed__)) 
 
 ### Phase 1: Mounting/Unmounting
 We used the following data structures/functions to implement Phase 1:
 
 * struct __attribute__ ((__packed__)) filedescriptor
+* append usedata and 
 * static struct fsys \* fs
 * struct fsys \* fs_malloc()
 * int fs_mount(const char \*diskname)
 * int fs_umount(void)
-* int fs_getfreefat()
-* int fs_getfreefiles()
 * int fs_info(void)
 
-// Joel (in this section i usually write about each function/struct)
+In order to easily access a virtual disk that we would like to mount, we need 
+to store only the first few blocks into our filesystem. We declare a global 
+static fsys * fs that is used for the rest of the program. When we call 
+*fs_mount* we open the given disk and proceed to store the *root*, *super*, and
+*fat* list inside fs with *fs_malloc*. We read the superblock first because it
+informs us how large the drive is, the number of fatblocks needed, as well as
+other useful information that we use to malloc and read the correct blocks 
+into fs. If any of the given disk api fails while allocating for fs, we return 
+NULL, which returns -1 in fs_mount, denoting a failure to mount. For
+*fs_umount* we write the updated fatblocks and updated rootblock back into
+the virtual drive, close the disk, and free all memory used. *fs_info* simply 
+returns certain pieces of information from the super block and filesystem.
+We added an int *usedata* variable in our filesystem that keeps track of how
+many fat words are in use, including the first word which is always FAT_EOC.
+We also added an int *entries* that keeps track of the number of files on disk.
+These two ints are used for printing free ratios for fat and root
+
+
 
 ### Phase 2: File Creation/Deletion
 We used the following functions to implement Phase 2:
@@ -63,7 +82,8 @@ locations to 0. We go to our disk space where we allocate *Data blocks* and
 write over blocks of size *BLOCK_SIZE* with a void pointer. Lastly, our *fs_ls*
 loops through the length of our *Root directory* and prints entries with a 
 non-empty char array, which is held in our *name* variable in the
-*filedescriptor* struct. 
+*filedescriptor* struct. Inside *fs_create* and *fs_delete* we also inc and dec
+*fs->entries* respectively.
 
 ### Phase 3: File Descriptor Operations
 We used the following data structures/functions to implement Phase 3:
@@ -102,11 +122,31 @@ value.
 We used the following functions to implement Phase 4:
 
 * int fs_findblockindex(int entryindex, int blockindex)
-* int fs_addblock(int fd, size_t offset)
+* int fs_firstemptyfat()
+* int fs_addblock(int entryindex, int blockindex)
 * int fs_write(int fd, void \*buf, size_t count)
 * int fs_read(int fd, void \*buf, size_t count)
 
-// Joel (in this section i usually write about each function/struct)
+*fs_read* searches for the openfile using given *fd*, returns the name which 
+is then searched for in the root entries. We then mod openfile's offset by 
+BLOCK_SIZE which gives us how many data blocks we must move past to find the 
+start of our read (blockindex). We then pass the root entryindex and file's 
+blockindex to *fs_findblockindex* which follows the fat chain starting from 
+root entry's *startindex* until it reaches the correct blockindex and returns
+the correct wordindex for the indexed datablock for the file. Then, we read
+the correct datablock into a temporary *blockbuf* and copy into the correct 
+position of the full buffer we are given. We continue finding the next data
+block with *fs_findblockindex* until we have read all of count or reached EOC.
+*fs_write* is pretty similar to *fs_read*, but we needed extra functionality.
+We created an *fs_addblock* which returns the correct datablock index similar
+to *fs_findblockindex*, however, the method also adds appends data to the file
+if needed with the use of our helper *fs_firstemptyfat* which finds the first
+unused datablock index in the fat. For both *fs_write* and *fs_read* we had
+to deal with a base case that assumed an offset in the openfile. The offset
+affects *byteread*, *count*, and memory we copy from block into/from buf. 
+The base case and general case for both methods have two cases: whether we
+have read/written enough, or we if we must continue reading/writing. This 
+is dependent on count-offset for base and on count for general.
 
 ## Additional Code
 ### Makefile Development
@@ -116,4 +156,8 @@ folder.
 
 ### Testing File
 #### test_fs.c
-// Joel (something quick)
+
+This test file was given to us to use and it's purpose is to use the api we 
+created in fs.c by using the disk created by the given disk api. It was tough
+to test phase 2,3, and 4 without them all being finished, because test_fs.c 
+uses all three methods developed in these phases for one api call (e.g add/rm).
