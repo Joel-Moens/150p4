@@ -46,6 +46,7 @@ struct __attribute__ ((__packed__)) fsys {
 	struct openfile ** files;
 	int ofnum;
 	int usedata;
+	int entries;
 }; // File system struct, contains a superblock, list of fatblocks, rootblock, and list of openfiles and openfile num
 
 //Pointer to the filesystem we will malloc when we mount a disk
@@ -96,6 +97,7 @@ struct fsys * fs_malloc()
 	newfs->files = (struct openfile **) malloc(sizeof(struct openfile*)*32);
 	newfs->ofnum = 0;
 	newfs->usedata = 1;
+	newfs->entries = 0;
 	return newfs;
 }
 
@@ -164,6 +166,8 @@ int fs_umount(void)
 		} // Write the root block into disk and free
 
 	}
+	if(block_disk_close() == -1)
+		return -1;
 	free(fs->super);
 	//printf("Freed superblock \n");
 	free(fs);
@@ -196,16 +200,6 @@ int fs_getfreefat()
 	}
 	return (fs->super->datablocknum - (wordindex + (blockindex * 2048)));
 }
-int fs_getfreefiles()
-{
-	int index = 0;
-	while(fs->root->entry[index].name[0] != '\0')
-	{
-		index++;
-	}
-	return (128 - index);
-}
-
 
 // helper function to find first empty entry in root
 int fs_findemptyfd()
@@ -228,7 +222,7 @@ int fs_findfd(const char *filename)
 		// return index of where we have a matching filename
 		if (strncmp(filename,fs->root->entry[i].name,16) == 0)
 		{
-			printf("Name match --> %s == %s <-- \n", filename, fs->root->entry[i].name);
+			//printf("Name match --> %s == %s <-- \n", filename, fs->root->entry[i].name);
 			return i;
 		}
 	}	
@@ -244,18 +238,22 @@ int fs_info(void)
 	 	fs->super->rootindex,
 	 	fs->super->dataindex,
 	 	fs->super->datablocknum,
-	 	fs_getfreefat(),fs->super->datablocknum,
-	 	fs_getfreefiles(), 128);
+	 	fs->usedata,fs->super->datablocknum,
+	 	fs->entries, 128);
 
 	return 0;	/* TODO: Phase 1 */
 }
 int fs_create(const char *filename)
 {
-	int status = fs_findemptyfd();
-	printf("Inside fs_create \n status of empty fd is : %d \n", status);
-	// if we can't find an empty entry in root, fail
-	if (status == -1)
-		return status;
+	int status = 0;
+	if(fs->entries < 128)
+	{
+		status = fs_findemptyfd();
+	}
+	else
+	{
+		return -1;
+	}
 	// if our filename is too large or isn't NULL-terminated or already exists in root, fail
 	if ((sizeof(*filename) > 16) || (filename[-1] != '\0') || (fs_findfd(filename) != -1)) 
 	{
@@ -267,6 +265,7 @@ int fs_create(const char *filename)
 	strcpy(given->name,filename);
 	given->size = 0;
 	given->startindex = FAT_EOC;
+	fs->entries++;
 	printf("File created at root entry: %d, with name %s \n",status,filename);
 	return 0;	/* TODO: Phase 2 */
 }
@@ -275,6 +274,7 @@ int fs_delete(const char *filename)
 {
 	// we will have to add check for file being currently open, return -1 if so
 	int status = fs_findfd(filename);
+	char empty[16] = "\0";
 	// if we can't find the filename in root, fail
 	if (status == -1)
 		return status;
@@ -285,7 +285,8 @@ int fs_delete(const char *filename)
 	struct filedescriptor * given = &(fs->root->entry[status]);
 	if ((given->size == 0) && (given->startindex == FAT_EOC))
 	{
-		memset(&given->name[0],0,sizeof(given->name));
+		memcpy(given->name, empty, 16);
+		fs->entries--;
 		return 0;
 	}
 	// we need to find out where in FAT our file info is stored
@@ -295,7 +296,6 @@ int fs_delete(const char *filename)
 	printf("Given startindex is %d \n", given->startindex);
 	x = fatblock;
 	y = given->startindex - (2048*fatblock);
-	char empty[16] = "\0";
 	memcpy(given->name, empty, 16);
 	//What are we doing here ^ ^ ^??
 	given->size = 0;
@@ -318,6 +318,7 @@ int fs_delete(const char *filename)
 	// one last block_write to clean FAT_EOC root/disk
 	(fs->fat[x])->word[y] = 0;
 	block_write(y + fs->super->dataindex,delete_ptr);
+	fs->entries--;
 	free(delete_ptr);
 	return 0;	/* TODO: Phase 2 */
 }
