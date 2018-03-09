@@ -285,7 +285,6 @@ int fs_delete(const char *filename)
 	y = given->startindex - (2048*fatblock);
 	memset(&given->name[0],0,sizeof(given->name));
 	//What are we doing here ^ ^ ^??
-	// We are clearing the file name from the char array, setting it to 0
 	given->size = 0;
 	given->startindex = FAT_EOC;
 	// looping through disk and FAT to clear data
@@ -447,11 +446,75 @@ int fs_findblockindex(int entryindex, int blockindex)
 	return wordindex;
 
 } // Find the index of the data block corresponding to file offset
-int fs_addblock(int fd, size_t offset)
+int fs_firstemptyfat()
 {
-	//find the first free fat block
-	//
-	return 0;
+
+	for(int findex = 0; findex < fs->super->fatnum; findex++)
+	{
+		for(int windex = 0; windex < 2048; windex++)
+		{
+			if((fs->fat[findex])->word[windex] != 0)
+			{
+				continue;
+			}
+			else
+			{
+				return (findex*2048 + windex); // return the fat array index
+			}
+		}
+	}
+	return -1;
+
+}
+
+int fs_addblock(int entryindex, int blockindex)
+{
+	struct filedescriptor * given = &(fs->root->entry[entryindex]);
+	int fatindex;
+	int windex; 
+	if(given->startindex == FAT_EOC)
+	{
+		//Search fat for empty word index
+		given->startindex = fs_firstemptyfat();
+		//Find the fat block we are searching through
+		fatindex = given->startindex % 2048;
+		windex = given->startindex - (2048*fatindex);
+		(fs->fat[fatindex])->word[windex] = FAT_EOC;
+		//Assign given->startindex to the empty data block index in the fat array
+		//Assign index in the fat array to FAT_EOC
+	} // File descriptor is empty
+	if(blockindex == 0)
+		return given->startindex;
+	//if blockindex == 0 then we return the index to the first data block
+	// otherwise we use the fat chain to find the correct datablock based on blockindex
+	int x = 0, y = 0;
+	fatindex = given->startindex % 2048;
+	// Find the fatblock to search through
+	int wordindex = 0;
+	x = fatindex;
+	// x equals fat block index
+	y = given->startindex - (2048*fatindex);
+	// y equals word index in fat block
+	for(int i = 0; i < blockindex; i++)
+	{
+		wordindex = (fs->fat[x])->word[y];
+		if(wordindex == FAT_EOC)
+		{
+			wordindex = fs_firstemptyfat();
+			if(wordindex == -1)
+			{
+				return -1; 
+			} // No more empty data blocks
+			else
+			{
+				(fs->fat[x])->word[y] = wordindex;
+			} // Fat word linked to next empty fat index
+		} // If the next word in the chain is FAT_EOC we need to keep adding
+		x = wordindex % 2048;
+		y = wordindex - (2048*fatindex);
+	} // Move along the chain until the correct data block index is found
+	 
+	return wordindex;
 }
 
 int fs_write(int fd, void *buf, size_t count)
@@ -467,12 +530,13 @@ int fs_write(int fd, void *buf, size_t count)
 	if root has a given->startindex, but we are writing passed allocated space
 	then we have to add a datablock, but append to our current fat list and make this datablock word = FAT_EOC
 	 */
-	// int ofindex = fs_findfilefd(fd);
-	// int entryindex = fs_findfd(fs->files[ofindex])
-	// int blockindex = (fs->files[ofindex])->offset % BLOCK_SIZE;
-	// int offset = (fs->files[ofindex])->offset - (blockindex * BLOCK_SIZE); // Offset after being inside the right data block
-	// int dataindex = fs_findblockindex(entryindex, blockindex);
-	// struct filedescriptor * given = &(fs->root->entry[entryindex]);
+	int ofindex = fs_findfilefd(fd);
+	int entryindex = fs_findfd(fs->files[ofindex]->name);
+	int blockindex = (fs->files[ofindex])->offset % BLOCK_SIZE;
+	int offset = (fs->files[ofindex])->offset - (blockindex * BLOCK_SIZE); // Offset after being inside the right data block
+	int dataindex = fs_addblock(entryindex, blockindex);
+	struct filedescriptor * given = &(fs->root->entry[entryindex]);
+	// 
 	// number of bytes written can be smaller than count if we run out of size
 	return 0;	
 }
