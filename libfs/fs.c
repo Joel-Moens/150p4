@@ -295,19 +295,24 @@ int fs_delete(const char *filename)
 	printf("Given startindex is %d \n", given->startindex);
 	x = fatblock;
 	y = given->startindex - (2048*fatblock);
-	memset(&given->name[0],0,sizeof(given->name));
+	char empty[16] = "\0";
+	memcpy(given->name, empty, 16);
 	//What are we doing here ^ ^ ^??
 	given->size = 0;
 	given->startindex = FAT_EOC;
+	fs->usedata--;
 	// looping through disk and FAT to clear data
 	while ((fs->fat[x])->word[y] != FAT_EOC)
 	{
-		int old_y = y;
-		int new_y = (fs->fat[x])->word[y];
+		int old_y = y;	// Save old word index
+		int new_y = (fs->fat[x])->word[y]; // Find the new word index
+		x = new_y % 2048;
+		new_y -= (2048*x);
 		// decrement the global # of used datablocks
 		(fs->fat[x])->word[y] = 0;
 		printf("Trying to write into block %d + %d with empty delete pointer\n", old_y, fs->super->dataindex);
 		block_write(old_y + fs->super->dataindex,delete_ptr);
+		fs->usedata--;
 		y = new_y;
 	} // While the current word in the chain doesn't equal FAT_EOC empty the data block associated with word
 	// one last block_write to clean FAT_EOC root/disk
@@ -352,7 +357,7 @@ int fs_findfilefd(int fd)
 		{
 			// return index of where we have match
 			printf("Currently checking open file %d, it is not NULL, name is %s\n", i, fs->files[i]->name);
-			printf("Open file %d filenum %d is not equal to %d", i,(fs->files[i])->file_d, fd);
+			printf("Open file %d filenum %d is not equal to %d \n", i,(fs->files[i])->file_d, fd);
 			if ((fs->files[i])->file_d == fd)
 				return i;
 		}
@@ -488,6 +493,7 @@ int fs_firstemptyfat()
 			{
 				// have a global # of data blocks being used
 				// increment the global #
+				printf("First empty fat found is %d\n", findex*2048 + windex);
 				return (findex*2048 + windex); // return the fat array index
 			}
 		}
