@@ -285,6 +285,7 @@ int fs_delete(const char *filename)
 	y = given->startindex - (2048*fatblock);
 	memset(&given->name[0],0,sizeof(given->name));
 	//What are we doing here ^ ^ ^??
+	// We are clearing the file name from the char array, setting it to 0
 	given->size = 0;
 	given->startindex = FAT_EOC;
 	// looping through disk and FAT to clear data
