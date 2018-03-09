@@ -292,6 +292,7 @@ int fs_delete(const char *filename)
 	{
 		int old_y = y;
 		int new_y = (fs->fat[x])->word[y];
+		// decrement the global # of used datablocks
 		(fs->fat[x])->word[y] = 0;
 		block_write(old_y + fs->super->dataindex,delete_ptr);
 		y = new_y;
@@ -459,11 +460,13 @@ int fs_firstemptyfat()
 			}
 			else
 			{
+				// have a global # of data blocks being used
+				// increment the global #
 				return (findex*2048 + windex); // return the fat array index
 			}
 		}
 	}
-	return -1;
+	return -1; // If we search through entire fat array and no block equals zero fat array is full;
 
 }
 
@@ -476,6 +479,11 @@ int fs_addblock(int entryindex, int blockindex)
 	{
 		//Search fat for empty word index
 		given->startindex = fs_firstemptyfat();
+		if(given->startindex == -1)
+		{
+			given->startindex = FAT_EOC;
+			return -1;
+		} // No free blocks left to be allocated 
 		//Find the fat block we are searching through
 		fatindex = given->startindex % 2048;
 		windex = given->startindex - (2048*fatindex);
@@ -530,15 +538,100 @@ int fs_write(int fd, void *buf, size_t count)
 	if root has a given->startindex, but we are writing passed allocated space
 	then we have to add a datablock, but append to our current fat list and make this datablock word = FAT_EOC
 	 */
+	size_t byteread = 0;
 	int ofindex = fs_findfilefd(fd);
+	if(ofindex == -1)
+	{
+		return -1;
+	}
 	int entryindex = fs_findfd(fs->files[ofindex]->name);
 	int blockindex = (fs->files[ofindex])->offset % BLOCK_SIZE;
 	int offset = (fs->files[ofindex])->offset - (blockindex * BLOCK_SIZE); // Offset after being inside the right data block
-	int dataindex = fs_addblock(entryindex, blockindex);
+	int dataindex = fs_addblock(entryindex, blockindex);	// Find the index of datablock in file based on offset add datablocks if needed
+	if(dataindex == -1)
+	{
+		return byteread;
+	} // No more datablocks that can be allocated
+	int block2write = (count + offset) % BLOCK_SIZE;
 	struct filedescriptor * given = &(fs->root->entry[entryindex]);
-	// 
+	int writeindex = 0;
+	char * blockbuf = (char *) malloc(sizeof(char) * BLOCK_SIZE);
+	char * bwriteindex = buf; // byte write index not bread index
+	char * breadindex = blockbuf;
+	while(dataindex != -1 && writeindex < block2write)
+	{
+		if(writeindex == 0)
+		{
+			if(block_read(dataindex + fs->super->dataindex, blockbuf) == -1)
+			{
+				return -1;
+			} // We have to read the first block in and only change past the offset of the block
+			if(count > BLOCK_SIZE - offset)
+			{
+				breadindex += offset; // Move the pointer in blockbuf to offset
+				memcpy(breadindex, buf, BLOCK_SIZE-offset); // Copy the buf into block
+				bwriteindex += BLOCK_SIZE-offset; // Move the pointer in write buffer 
+				if(block_write(dataindex + fs->super->dataindex, blockbuf) == -1)
+				{
+					return -1;
+				} // Write the new block with previous data + offset data
+				byteread += BLOCK_SIZE - offset;
+				count -= BLOCK_SIZE - offset;
+				dataindex = fs_addblock(entryindex, ++writeindex + blockindex);
+				continue;
+
+			} // Gonna continue 
+			else if(count <= BLOCK_SIZE - offset)
+			{
+				breadindex += offset;
+				memcpy(breadindex, buf, count);
+				if(block_write(dataindex + fs->super->dataindex, blockbuf) == -1)
+				{
+					return byteread;
+				}
+				byteread += count;
+				(fs->files[ofindex])->offset += count;
+				given->size += count;
+				free(blockbuf);
+				return byteread;
+			}
+		}
+		else
+		{
+			if(count > BLOCK_SIZE)
+			{
+				memcpy(blockbuf,bwriteindex, BLOCK_SIZE);
+				if(block_write(dataindex + fs->super->dataindex, blockbuf) == -1)
+				{
+					return byteread;
+				}
+				bwriteindex += BLOCK_SIZE; // Move the pointer in the given buffer
+				byteread += BLOCK_SIZE; // Add 4096 bytes read
+				count -= BLOCK_SIZE; // Size of block subtracted from total size of write 
+				dataindex = fs_addblock(entryindex, ++writeindex + blockindex); 
+				continue;
+				// Dataindex = entry in root and blockindex + blocks we have written to alread
+			}
+			else if(count <= BLOCK_SIZE)
+			{
+				memcpy(blockbuf,bwriteindex, count);
+				if(block_write(dataindex + fs->super->dataindex, blockbuf) == -1)
+				{
+					return byteread;
+				}
+				byteread += count;
+				dataindex = fs_addblock(entryindex, ++writeindex + blockindex);
+				continue;
+			}
+		}
+		
+
+	}
 	// number of bytes written can be smaller than count if we run out of size
-	return 0;	
+	given->size += byteread;
+	(fs->files[ofindex])->offset += byteread; // Offset is moved to the number of bytes read
+	free(blockbuf);
+	return byteread;	
 }
 
 int fs_read(int fd, void *buf, size_t count)
@@ -578,8 +671,9 @@ int fs_read(int fd, void *buf, size_t count)
 				count -= byteread; // subtract count by # bytes read so far
 				memcpy(breadindex, blockbuf+offset, BLOCK_SIZE-offset); // copy from offset in first block 
 				breadindex += byteread; // move the pointer to the next part of readbuf to read into
+				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
 			} // Count is larger than the first block read - the offset we start at
-			else if(count < BLOCK_SIZE - offset)
+			else if(count <= BLOCK_SIZE - offset)
 			{
 				byteread = count; // only read size of count
 				offset += byteread; // move offset to where we ended 
@@ -598,13 +692,15 @@ int fs_read(int fd, void *buf, size_t count)
 				count -= byteread; // size of count remaining decremented 
 				memcpy(breadindex, blockbuf, BLOCK_SIZE); // copy a full block into the index of readbuf 
 				breadindex += BLOCK_SIZE; // move the byte read index
+				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
 			} // size of read is larger than this block so keep going
-			if(count < BLOCK_SIZE)
+			if(count <= BLOCK_SIZE)
 			{
 				byteread += count; // Add the last bit of count to return the number of bytes read
 				offset += byteread; // This will be the last read since size of count is less than the size of a data block
 				memcpy(breadindex, blockbuf, count);
 				breadindex += count;
+				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
 			} // size of remaining read is smaller than a block, only copy in the remaining size
 		} // Now reading block by block, either continuing 
 	}
