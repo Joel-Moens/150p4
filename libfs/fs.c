@@ -565,7 +565,7 @@ int fs_addblock(int entryindex, int blockindex)
 	// x equals fat block index
 	for(int i = 0; i < blockindex; i++)
 	{
-		printf("Fat index is: %d , Word index is: %d \n", x, y);
+		printf("Fat index is: %d , Word index is: %d Block index is: %d \n", x, y, blockindex);
 		wordindex = (fs->fat[x])->word[y];
 		if(wordindex == FAT_EOC)
 		{
@@ -604,20 +604,22 @@ int fs_write(int fd, void *buf, size_t count)
 		return -1;
 	}
 	int entryindex = fs_findfd(fs->files[ofindex]->name);
-	int blockindex = (fs->files[ofindex])->offset % BLOCK_SIZE;
+	int blockrem = (fs->files[ofindex])->offset % BLOCK_SIZE;
+	int blockindex = ((fs->files[ofindex])->offset - blockrem) / BLOCK_SIZE;
 	int offset = (fs->files[ofindex])->offset - (blockindex * BLOCK_SIZE); // Offset after being inside the right data block
 	int dataindex = fs_addblock(entryindex, blockindex);	// Find the index of datablock in file based on offset add datablocks if needed
 	if(dataindex == -1)
 	{
 		return byteread;
 	} // No more datablocks that can be allocated
-	int block2write = (count + offset) % BLOCK_SIZE;
+	blockrem = (count + offset) % BLOCK_SIZE;
+	int block2write = (count + offset - blockrem) / BLOCK_SIZE;
 	struct filedescriptor * given = &(fs->root->entry[entryindex]);
 	int writeindex = 0;
 	char * blockbuf = (char *) malloc(sizeof(char) * BLOCK_SIZE);
 	char * bwriteindex = buf; // byte write index not bread index
 	char * breadindex = blockbuf;
-	while(dataindex != -1 && writeindex < block2write)
+	while(dataindex != -1 && writeindex < block2write+1)
 	{
 		if(writeindex == 0)
 		{
@@ -705,7 +707,8 @@ int fs_read(int fd, void *buf, size_t count)
 		return -1;
 	} // fd is invalid
 	int entryindex = fs_findfd((fs->files[ofindex])->name); // Find the entry in root using the openfile name
-	int blockindex = (fs->files[ofindex])->offset % BLOCK_SIZE; // mod the openfile offset to datablock size to find which file datablock to start at
+	int blockrem = (fs->files[ofindex])->offset % BLOCK_SIZE;
+	int blockindex = ((fs->files[ofindex])->offset - blockrem) / BLOCK_SIZE;
 	int offset = (fs->files[ofindex])->offset - (blockindex * BLOCK_SIZE); // Offset after being inside the right data block
 	int dataindex = fs_findblockindex(entryindex, blockindex);
 	// find the first datablock in file to read from by using openfile offset
@@ -713,12 +716,14 @@ int fs_read(int fd, void *buf, size_t count)
 	{
 		return byteread;
 	} //reached FAT_EOC right away with the offset
-	int block2read = (count + offset) % BLOCK_SIZE;
+	blockrem = (fs->files[ofindex])->offset % BLOCK_SIZE;
+	int block2read = ((count + offset) - blockrem) / BLOCK_SIZE;
+	printf("BEGINNING READ COUNT IS: %zu \n",count);
 	int readindex = 0;
-	char * readbuf = (char *) malloc(sizeof(char) * count);
+	char * readbuf = (char *) malloc(sizeof(buf));
 	char * blockbuf = (char *) malloc(sizeof(char) * BLOCK_SIZE);
 	char * breadindex = readbuf; // byte read index not bread index
-	while(dataindex != -1 && readindex < block2read)
+	while(dataindex != -1 && readindex < block2read + 1)
 	{		
 		if(block_read(dataindex + fs->super->dataindex, blockbuf) == -1)
 			return -1;
@@ -729,6 +734,7 @@ int fs_read(int fd, void *buf, size_t count)
 				byteread = BLOCK_SIZE - offset; // first block may be at an offset so we read less bytes than a full block
 				offset += byteread; //offset will now be at the beginning of the next data block
 				count -= byteread; // subtract count by # bytes read so far
+				printf("READ ONE BLOCK CONTINUING byteread is: %zu count is: %zu \n", byteread, count);
 				memcpy(breadindex, blockbuf+offset, BLOCK_SIZE-offset); // copy from offset in first block 
 				breadindex += byteread; // move the pointer to the next part of readbuf to read into
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
@@ -737,9 +743,9 @@ int fs_read(int fd, void *buf, size_t count)
 			{
 				byteread = count; // only read size of count
 				offset += byteread; // move offset to where we ended 
+				printf("READ ONE BLOCK ENDING \n");
 				memcpy(buf, blockbuf, count); // copy size of count of blockbuf into the buf
 				free(blockbuf);	// free the block buffer after copying into buf
-				free(readbuf); // free the read buffer
 				return byteread;
 			} // Size of read (count) is less than the size the first block - offset
 		} // This is our first read, so the offset matters after this we will read block by block
@@ -749,24 +755,27 @@ int fs_read(int fd, void *buf, size_t count)
 			{
 				byteread += BLOCK_SIZE; // read a full block of bytes
 				offset += byteread; // offset moved by read
-				count -= byteread; // size of count remaining decremented 
+				count -= BLOCK_SIZE; // size of count remaining decremented 
 				memcpy(breadindex, blockbuf, BLOCK_SIZE); // copy a full block into the index of readbuf 
 				breadindex += BLOCK_SIZE; // move the byte read index
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
+				printf("READ %d BLOCKS CONTINUING count is now: %zu \n", readindex, count);
+				continue;
 			} // size of read is larger than this block so keep going
 			if(count <= BLOCK_SIZE)
 			{
 				byteread += count; // Add the last bit of count to return the number of bytes read
 				offset += byteread; // This will be the last read since size of count is less than the size of a data block
-				memcpy(breadindex, blockbuf, count);
+				//memcpy(breadindex, blockbuf, count);
 				breadindex += count;
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
+				printf("READ %d BLOCKS ENDING \n", readindex);
+				free(blockbuf);
+				memcpy(buf, readbuf, byteread);
+				free(readbuf);
 			} // size of remaining read is smaller than a block, only copy in the remaining size
 		} // Now reading block by block, either continuing 
 	}
-	memcpy(buf, readbuf, byteread); //copy all the blocks of memory added by blockbuf using breadindex
-	free(blockbuf);	// free the blockbuffer
-	free(readbuf); // free the readbuffer after copying into buf
 	return byteread;
 
 }
