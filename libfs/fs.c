@@ -700,9 +700,7 @@ int fs_read(int fd, void *buf, size_t count)
 				byteread = BLOCK_SIZE - offset; // first block may be at an offset so we read less bytes than a full block
 				offset += byteread; //offset will now be at the beginning of the next data block
 				count -= byteread; // subtract count by # bytes read so far
-				memcpy(buf, blockbuf, BLOCK_SIZE); // copy from offset in first block 
-				//memcpy(buf, blockbuf+offset, BLOCK_SIZE-offset); // copy from offset in first block 
-				//printf("buf is %s\n",(char*)buf);
+				memcpy(buf, blockbuf+offset, BLOCK_SIZE-offset); // copy from offset in first block 
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
 			} // Count is larger than the first block read - the offset we start at
 			else if(count <= BLOCK_SIZE - offset)
