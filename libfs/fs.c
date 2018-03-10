@@ -687,10 +687,14 @@ int fs_read(int fd, void *buf, size_t count)
 	int block2read = ((count + offset) - blockrem) / BLOCK_SIZE;
 	int readindex = 0;
 	char * blockbuf = (char *) malloc(sizeof(char) * BLOCK_SIZE);
+	// I THINK THE ERROR IS IN THE FOLLOWING LINE
 	while(dataindex != -1 && readindex < block2read + 1)
 	{		
+		printf("runs a block\n");
 		if(block_read(dataindex + fs->super->dataindex, blockbuf) == -1)
+		{
 			return -1;
+		}
 		if(readindex == 0)
 		{
 			if(count > BLOCK_SIZE - offset)
@@ -698,14 +702,14 @@ int fs_read(int fd, void *buf, size_t count)
 				byteread = BLOCK_SIZE - offset; // first block may be at an offset so we read less bytes than a full block
 				offset += byteread; //offset will now be at the beginning of the next data block
 				count -= byteread; // subtract count by # bytes read so far
-				memcpy(buf, blockbuf+offset, BLOCK_SIZE-offset); // copy from offset in first block 
+				strncpy(buf, blockbuf+offset, BLOCK_SIZE-offset); // copy from offset in first block 
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
 			} // Count is larger than the first block read - the offset we start at
 			else if(count <= BLOCK_SIZE - offset)
 			{
 				byteread = count; // only read size of count
 				offset += byteread; // move offset to where we ended 
-				memcpy(buf, blockbuf, count); // copy size of count of blockbuf into the buf
+				strncpy(buf, blockbuf, count); // copy size of count of blockbuf into the buf
 				free(blockbuf);	// free the block buffer after copying into buf
 				return byteread;
 			} // Size of read (count) is less than the size the first block - offset
@@ -714,7 +718,7 @@ int fs_read(int fd, void *buf, size_t count)
 		{
 			if(count > BLOCK_SIZE)
 			{
-				memcpy(buf + byteread, blockbuf, BLOCK_SIZE); // copy a full block into the index of readbuf 
+				strncpy(buf + byteread, blockbuf, BLOCK_SIZE); // copy a full block into the index of readbuf 
 				byteread += BLOCK_SIZE; // read a full block of bytes
 				offset += byteread; // offset moved by read
 				count -= BLOCK_SIZE; // size of count remaining decremented 
@@ -723,7 +727,7 @@ int fs_read(int fd, void *buf, size_t count)
 			} // size of read is larger than this block so keep going
 			if(count <= BLOCK_SIZE)
 			{
-				memcpy(buf + byteread, blockbuf, count);
+				strncpy(buf + byteread, blockbuf, count);
 				byteread += count; // Add the last bit of count to return the number of bytes read
 				offset += byteread; // This will be the last read since size of count is less than the size of a data block
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
@@ -731,6 +735,7 @@ int fs_read(int fd, void *buf, size_t count)
 			} // size of remaining read is smaller than a block, only copy in the remaining size
 		} // Now reading block by block, either continuing 
 	}
+	printf("finishes while loop too fast\n");
 	return byteread;
 
 }
