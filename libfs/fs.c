@@ -6,10 +6,7 @@
 #include "disk.h"
 #include "fs.h" 
 #define FAT_EOC 65535
-//uint8_t
-//uint16_t
-//uint32_t
-//uint64_t
+
 struct __attribute__ ((__packed__)) filedescriptor {
 	char name[16];
 	uint32_t size;
@@ -34,7 +31,6 @@ struct openfile {
 struct __attribute__ ((__packed__)) fatblock {
 	uint16_t word[2048];
 }; //Block that stores 2byte entries per datablock linking them if used in same file
-//THIS MAY NEED TO BE A uint16_t pointer that we initialize later?
 struct __attribute__ ((__packed__)) rootblock {
 	// Contains an entry for each file of fs
 	struct filedescriptor entry[128];
@@ -51,7 +47,6 @@ struct __attribute__ ((__packed__)) fsys {
 
 //Pointer to the filesystem we will malloc when we mount a disk
 static struct fsys * fs;
-//fs was going to be our filesystem that we use for this entire project, but trying to test out each component to see what the problem is
 /* TODO: Phase 1 */
 int fs_iteratefat()
 {
@@ -90,12 +85,10 @@ struct fsys * fs_malloc()
 	char signature[8] = "ECS150FS";
 	if(strncmp(newfs->super->sig, signature, 8) != 0)
 	{
-		printf("Error Signature does not equal ECS150FS \n");
 		return NULL;
 	}
 	if((newfs->super->fatnum + 2 + newfs->super->datablocknum) != newfs->super->blocksize)
 	{
-		printf("Error Block Size and Fatnum + Root + Super + Data Block Size are not equal. \n");
 		return NULL;
 	}
 	
@@ -106,15 +99,11 @@ struct fsys * fs_malloc()
 	for(uint16_t i=0; i<newfs->super->fatnum; i++)
 	{
 		newfs->fat[i] = (struct fatblock *) malloc(sizeof(struct fatblock));
-		//printf("Allocated memory for fatblock %d\n", i);
 	}
 	while(blockindex < newfs->super->rootindex)
 	{
-		//printf("Trying to insert fatblock %d rootindex is %d \n", blockindex-1,newfs->super->rootindex);
 		block_read(diskindex, newfs->fat[blockindex-1]);
-		//printf("If buffer were casted to a fatblock the first entry would be: %d\n", newfs->fat[blockindex-1]->word[0]);
 		diskindex++;
-		//newfs->fat[index-1] = (struct fatblock *) malloc(sizeof(struct fatblock));
 		blockindex++;
 	} // iterate through each fat and insert into fs
 	newfs->root = (struct rootblock *) malloc(sizeof(struct rootblock));
@@ -137,7 +126,6 @@ int fs_mount(const char *diskname)
 	}
 	else
 	{
-		//printf("TRYING TO MOUNT \n");
 		
 		//Make a superblock *
 		fs = fs_malloc();
@@ -156,7 +144,6 @@ int fs_mount(const char *diskname)
 int fs_umount(void)
 {
 	/* TODO: Phase 1 */
-	//printf("TRYING TO UNMOUNT \n");
 	int index = 0;
 	int fatindex = 0;
 	size_t diskindex = 0;
@@ -176,18 +163,15 @@ int fs_umount(void)
 			if(block_write(diskindex++, temp) == -1)
 				return -1; // if blockwrite fails 
 			free(temp); // Free the fatblock * one by one
-			// printf("Freed fatblock #%d \n",fatindex);
 			index++;
 			continue;
 		} // Write the fat blocks 
 		if(index == fs->super->rootindex)
 		{
 			free(fs->fat); // Free the fatblock **
-			// printf("Free fat list \n");
 			if(block_write(diskindex++, fs->root) == -1)
 				return -1; // if blockwrite fails 
 			free(fs->root); // Free the rootblock *
-			// printf("Freed rootblock \n");
 			index++;
 			continue;
 		} // Write the root block into disk and free
@@ -196,9 +180,7 @@ int fs_umount(void)
 	if(block_disk_close() == -1)
 		return -1;
 	free(fs->super);
-	//printf("Freed superblock \n");
 	free(fs);
-	//printf("Freed filesystem \n");
 	return 0;	
 }
 int fs_getfreefat()
@@ -213,7 +195,6 @@ int fs_getfreefat()
 			return 0;
 			//We are passed the last known fat word
 		}
-		printf("fat[%d][%d] is : %d FAT_EOC is : %d \n", blockindex, wordindex, (fs->fat[blockindex])->word[wordindex], FAT_EOC);
 		if(wordindex < 2048)
 		{
 			wordindex++;			
@@ -245,11 +226,9 @@ int fs_findfd(const char *filename)
 {
 	for (int i = 0; i < 128; i++)
 	{
-		//printf("Trying to find the root entry with name %s \n", filename);
 		// return index of where we have a matching filename
 		if (strncmp(filename,fs->root->entry[i].name,16) == 0)
 		{
-			//printf("Name match --> %s == %s <-- \n", filename, fs->root->entry[i].name);
 			return i;
 		}
 	}	
@@ -284,7 +263,6 @@ int fs_create(const char *filename)
 	// if our filename is too large or isn't NULL-terminated or already exists in root, fail
 	if ((sizeof(*filename) > 16) || (filename[-1] != '\0') || (fs_findfd(filename) != -1)) 
 	{
-		printf("Inside fs_create \n status of finding fd is : %d \n", fs_findfd(filename));
 		return -1;
 	}
 	// adds file into file system 
@@ -293,7 +271,6 @@ int fs_create(const char *filename)
 	given->size = 0;
 	given->startindex = FAT_EOC;
 	fs->entries++;
-	printf("File created at root entry: %d, with name %s \n",status,filename);
 	return 0;	/* TODO: Phase 2 */
 }
 
@@ -321,10 +298,8 @@ int fs_delete(const char *filename)
 	int x = 0, y = 0;
 	y = given->startindex % 2048; // find word index 
 	int fatblock = (given->startindex - y)/2048; // find fatblock index
-	printf("Given startindex is %d \n", given->startindex);
 	x = fatblock;
 	memcpy(given->name, empty, 16);
-	//What are we doing here ^ ^ ^??
 	given->size = 0;
 	given->startindex = FAT_EOC;
 	fs->usedata--;
@@ -337,7 +312,6 @@ int fs_delete(const char *filename)
 		new_y -= (2048*x);
 		// decrement the global # of used datablocks
 		(fs->fat[x])->word[y] = 0;
-		printf("Trying to write into block %d + %d with empty delete pointer\n", old_y, fs->super->dataindex);
 		block_write(old_y + fs->super->dataindex,delete_ptr);
 		fs->usedata--;
 		y = new_y;
@@ -384,8 +358,6 @@ int fs_findfilefd(int fd)
 		if (fs->files[i] != NULL)
 		{
 			// return index of where we have match
-			printf("Currently checking open file %d, it is not NULL, name is %s\n", i, fs->files[i]->name);
-			printf("Open file %d filenum %d is not equal to %d \n", i,(fs->files[i])->file_d, fd);
 			if ((fs->files[i])->file_d == fd)
 				return i;
 		}
@@ -411,7 +383,6 @@ int fs_open(const char *filename)
 	if((fs->files[fs->ofnum])->pointer == NULL)
 		return -1;
 	fs->ofnum++;
-	printf("Opened file %s in root, inside fs->files[%d] \n", filename, status);
 
 	return (fs->files[status])->file_d;	/* TODO: Phase 3 */
 }
@@ -422,7 +393,6 @@ int fs_close(int fd)
 	if(fs->ofnum == 0)
 		return -1;
 	int status = fs_findfilefd(fd);
-	printf("Status = %d \n", status);
 	// could not find file descriptor, ERROR
 	if (status == -1)
 		return status;
@@ -520,7 +490,6 @@ int fs_firstemptyfat()
 			{
 				// have a global # of data blocks being used
 				// increment the global #
-				printf("First empty fat found is %d\n", findex*2048 + windex);
 				return (findex*2048 + windex); // return the fat array index
 			}
 		}
@@ -565,7 +534,6 @@ int fs_addblock(int entryindex, int blockindex)
 	// x equals fat block index
 	for(int i = 0; i < blockindex; i++)
 	{
-		printf("Fat index is: %d , Word index is: %d Block index is: %d \n", x, y, blockindex);
 		wordindex = (fs->fat[x])->word[y];
 		if(wordindex == FAT_EOC)
 		{
@@ -692,7 +660,6 @@ int fs_write(int fd, void *buf, size_t count)
 	given->size += byteread;
 	(fs->files[ofindex])->offset += byteread; // Offset is moved to the number of bytes read
 	free(blockbuf);
-	printf("Wrote %d bytes to file\n", (int)byteread);
 	return byteread;	
 }
 
@@ -718,7 +685,6 @@ int fs_read(int fd, void *buf, size_t count)
 	} //reached FAT_EOC right away with the offset
 	blockrem = (fs->files[ofindex])->offset % BLOCK_SIZE;
 	int block2read = ((count + offset) - blockrem) / BLOCK_SIZE;
-	printf("BEGINNING READ COUNT IS: %zu \n",count);
 	int readindex = 0;
 	char * blockbuf = (char *) malloc(sizeof(char) * BLOCK_SIZE);
 	while(dataindex != -1 && readindex < block2read + 1)
@@ -732,7 +698,6 @@ int fs_read(int fd, void *buf, size_t count)
 				byteread = BLOCK_SIZE - offset; // first block may be at an offset so we read less bytes than a full block
 				offset += byteread; //offset will now be at the beginning of the next data block
 				count -= byteread; // subtract count by # bytes read so far
-				printf("READ ONE BLOCK CONTINUING byteread is: %zu count is: %zu \n", byteread, count);
 				memcpy(buf, blockbuf+offset, BLOCK_SIZE-offset); // copy from offset in first block 
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
 			} // Count is larger than the first block read - the offset we start at
@@ -740,7 +705,6 @@ int fs_read(int fd, void *buf, size_t count)
 			{
 				byteread = count; // only read size of count
 				offset += byteread; // move offset to where we ended 
-				printf("READ ONE BLOCK ENDING \n");
 				memcpy(buf, blockbuf, count); // copy size of count of blockbuf into the buf
 				free(blockbuf);	// free the block buffer after copying into buf
 				return byteread;
@@ -755,7 +719,6 @@ int fs_read(int fd, void *buf, size_t count)
 				offset += byteread; // offset moved by read
 				count -= BLOCK_SIZE; // size of count remaining decremented 
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
-				printf("READ %d BLOCKS CONTINUING count is now: %zu \n", readindex, count);
 				continue;
 			} // size of read is larger than this block so keep going
 			if(count <= BLOCK_SIZE)
@@ -763,9 +726,7 @@ int fs_read(int fd, void *buf, size_t count)
 				memcpy(buf + byteread, blockbuf, count);
 				byteread += count; // Add the last bit of count to return the number of bytes read
 				offset += byteread; // This will be the last read since size of count is less than the size of a data block
-				//memcpy(breadindex, blockbuf, count);
 				dataindex = fs_findblockindex(entryindex, ++readindex + blockindex);
-				printf("READ %d BLOCKS ENDING \n", readindex);
 				free(blockbuf);
 			} // size of remaining read is smaller than a block, only copy in the remaining size
 		} // Now reading block by block, either continuing 
@@ -773,4 +734,3 @@ int fs_read(int fd, void *buf, size_t count)
 	return byteread;
 
 }
-
