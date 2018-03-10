@@ -32,6 +32,8 @@ We used the following data structures/functions to implement Phase 1:
 * int fs_mount(const char \*diskname)
 * int fs_umount(void)
 * int fs_info(void)
+* int fs_iteratefat()
+* int fs_iterateroot()
 
 In order to easily access a virtual disk that we would like to mount, we need 
 to store only the first few blocks into our filesystem. We declare a global 
@@ -48,7 +50,10 @@ returns certain pieces of information from the super block and filesystem.
 We added an int *usedata* variable in our filesystem that keeps track of how
 many fat words are in use, including the first word which is always FAT_EOC.
 We also added an int *entries* that keeps track of the number of files on disk.
-These two ints are used for printing free ratios for fat and root
+These two ints are used for printing free ratios for fat and root, and they 
+are assigned after *fs_malloc* immediately before returning from *fs_mount*.
+*fs_iteratefat* and *fs_iterateroot* return the number of usedata and entries
+using the fat blocks and root block.
 
 
 
@@ -129,14 +134,14 @@ We used the following functions to implement Phase 4:
 
 *fs_read* searches for the openfile using given *fd*, returns the name which 
 is then searched for in the root entries. We then mod openfile's offset by 
-BLOCK_SIZE which gives us how many data blocks we must move past to find the 
-start of our read (blockindex). We then pass the root entryindex and file's 
-blockindex to *fs_findblockindex* which follows the fat chain starting from 
-root entry's *startindex* until it reaches the correct blockindex and returns
-the correct wordindex for the indexed datablock for the file. Then, we read
-the correct datablock into a temporary *blockbuf* and copy into the correct 
-position of the full buffer we are given. We continue finding the next data
-block with *fs_findblockindex* until we have read all of count or reached EOC.
+BLOCK_SIZE for a remainder, which we use to find how many data blocks we must
+move past to find the start of our read (blockindex). We then pass the root 
+entryindex and file's blockindex to *fs_findblockindex* which follows the fat
+chain starting from root entry's *startindex* until it reaches the correct
+blockindex and returns the correct wordindex for the indexed datablock for the 
+file.Then, we read the correct datablock into a temporary *blockbuf* and copy
+into the correct position of the full buffer we are given. We continue finding
+the next data block with *fs_findblockindex* until we have read all of count or reached EOC.
 *fs_write* is pretty similar to *fs_read*, but we needed extra functionality.
 We created an *fs_addblock* which returns the correct datablock index similar
 to *fs_findblockindex*, however, the method also adds appends data to the file
